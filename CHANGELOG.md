@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.1.2 — defensive hardening
+
+All of these are real bugs that don't fire on stock SteamOS (username `deck`,
+normal `$HOME`, stable Plasma 6 tooling), but they're now fixed for wider
+users and future-proofing:
+
+- `install.sh` now renders the `.desktop` file via `awk -v` instead of
+  `sed` with a `|` delimiter. Paths containing `|`, `&`, or `\` no longer
+  break the substitution.
+- `toglit` `create_backup` strips the `$HOME/.config/` prefix by offset
+  (character count) instead of `${f#$HOME/.config/}` parameter expansion.
+  Exotic `$HOME` values containing `[`, `*`, `?` no longer cause the
+  prefix strip to silently miss, which previously could have written
+  backup files outside `$BACKUP_DIR`.
+- `toglit` QDBUS resolver: if neither `qdbus6` nor `qdbus` is installed,
+  `$QDBUS` is now empty rather than the literal string `"qdbus"`. The
+  existing `check_deps` gate catches this and exits with a clear
+  message instead of soft-failing silently on every D-Bus call.
+- `toglit` `_tui_wrap` (word-wrap for the menu's help area) hard-breaks
+  words longer than the box width. No current help string triggers this,
+  but a future 70-char URL in a help line can no longer overflow the
+  TUI frame.
+- `toglit` autologin detection + toggle are now scoped to the current
+  user (`$USER`). On a single-user Deck (the common case) the behaviour
+  is identical; on multi-user systems, TOGLIT no longer claims
+  autologin is "on" for a different account and no longer comments out
+  other users' `User=` lines when disabling.
+
 ## v1.1.1 — icon + docs
 
 - Ship the TOGLIT icon in the repo (`icons/toglit.svg`); `install.sh` drops

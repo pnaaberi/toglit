@@ -11,7 +11,7 @@ set -euo pipefail
 # rely on for aligning the TUI around em-dashes, middle-dots, box drawing, etc.
 export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 # =============================================================================
 # ASCII splash
@@ -226,7 +226,9 @@ TOUCH_FONT="Hack,14,-1,5,400,0,0,0,0,0"
 # qdbus resolver — Plasma 6 needs the Qt6 variant
 # =============================================================================
 
-QDBUS="$(command -v qdbus6 2>/dev/null || command -v qdbus 2>/dev/null || echo qdbus)"
+# If neither binary is installed, QDBUS stays empty — check_deps (below)
+# catches that and exits with a clear message instead of soft-failing later.
+QDBUS="$(command -v qdbus6 2>/dev/null || command -v qdbus 2>/dev/null || true)"
 
 # =============================================================================
 # Dependency check
@@ -299,9 +301,13 @@ create_backup() {
         "$PLASMASHELLRC"
     )
     local f rel
+    # Strip "$HOME/.config/" by offset (length of $HOME + 9 for "/.config/").
+    # Parameter-expansion prefix stripping would treat $HOME as a glob
+    # pattern and misbehave on exotic $HOME values containing [ * ? etc.
+    local home_prefix_len=$(( ${#HOME} + 9 ))
     for f in "${files[@]}"; do
         if [[ -f "$f" ]]; then
-            rel="${f#$HOME/.config/}"
+            rel="${f:home_prefix_len}"
             mkdir -p "$BACKUP_DIR/$(dirname "$rel")" 2>/dev/null || return 1
             cp "$f" "$BACKUP_DIR/$rel" 2>/dev/null || return 1
         fi
@@ -807,14 +813,19 @@ _warn_password_unknown() {
 }
 
 get_autologin_state() {
-    # "on"  — at least one SDDM drop has an uncommented User=<name> line, so
-    #         SDDM will skip the greeter and log that user straight in.
-    # "off" — every User= line is commented out (or absent). SDDM shows the
-    #         greeter on boot.
+    # Scoped to the current user ($USER) so TOGLIT never claims autologin
+    # is "on" for a different account on multi-user systems.
+    #
+    # "on"  — at least one SDDM drop has an uncommented "User=$USER" line,
+    #         so SDDM will skip the greeter and log $USER straight in.
+    # "off" — no such line. SDDM either shows the greeter or auto-logs a
+    #         different user — both count as "off" from $USER's point of
+    #         view.
     local f
     for f in "${SDDM_SYSTEM_CONFS[@]}"; do
         [[ -r "$f" ]] || continue
-        if grep -qE '^[[:space:]]*User[[:space:]]*=' "$f" 2>/dev/null; then
+        if grep -qE "^[[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*\$" \
+                "$f" 2>/dev/null; then
             echo "on"
             return
         fi
@@ -864,11 +875,14 @@ toggle_autologin() {
 
     local sed_expr
     if [[ "$new" == "off" ]]; then
-        # Comment every uncommented User= line.
-        sed_expr='s/^([[:space:]]*User[[:space:]]*=.*)$/#\1/'
+        # Comment only OUR User=$USER line — leave any other user's
+        # autologin config alone on multi-user systems.
+        sed_expr="s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*)\$/#\\1/"
     else
-        # Uncomment any commented User= line we previously wrote.
-        sed_expr='s/^#([[:space:]]*User[[:space:]]*=.*)$/\1/'
+        # Uncomment a commented #User=$USER line we (or SDDM defaults)
+        # previously wrote. If no such line exists, the edit is a no-op
+        # and the mismatch dialog below fires.
+        sed_expr="s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*)\$/\\1/"
     fi
 
     if ! pkexec /usr/bin/sed -i -E "$sed_expr" "${SDDM_SYSTEM_CONFS[@]}"; then
@@ -993,18 +1007,26 @@ repair_shortcut() {
 # =============================================================================
 
 # Word-wrap stdin to $1 columns, producing one line per output line.
+# Words longer than $1 are hard-broken at the column boundary so the TUI
+# box never overflows on a pathological help string.
 _tui_wrap() {
     local width="$1"
     awk -v w="$width" '
         {
             for (i=1; i<=NF; i++) {
+                word = $i
+                while (length(word) > w) {
+                    if (length(line) > 0) { print line; line = "" }
+                    print substr(word, 1, w)
+                    word = substr(word, w + 1)
+                }
                 if (length(line) == 0) {
-                    line = $i
-                } else if (length(line) + 1 + length($i) <= w) {
-                    line = line " " $i
+                    line = word
+                } else if (length(line) + 1 + length(word) <= w) {
+                    line = line " " word
                 } else {
                     print line
-                    line = $i
+                    line = word
                 }
             }
         }

@@ -43,8 +43,12 @@ ok "linked $LOCAL_BIN/toglit → $TOGLIT_BIN"
 # ---- Render .desktop files (substitute absolute Exec path) ----
 mkdir -p "$APPS_DIR" "$DESKTOP_DIR"
 render_desktop() {
+    # awk with `-v` passes the replacement as a literal string, so paths
+    # containing `|`, `&`, `\` (which would break a sed replacement) are
+    # substituted verbatim.
     local dest="$1"
-    sed "s|__TOGLIT_EXEC__|$TOGLIT_BIN|g" "$DESKTOP_TEMPLATE" > "$dest"
+    awk -v bin="$TOGLIT_BIN" '{ gsub(/__TOGLIT_EXEC__/, bin) } 1' \
+        "$DESKTOP_TEMPLATE" > "$dest"
     chmod +x "$dest"
 }
 render_desktop "$APPS_DIR/toglit.desktop"
