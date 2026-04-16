@@ -6,10 +6,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TOGLIT_BIN="$SCRIPT_DIR/toglit"
 DESKTOP_TEMPLATE="$SCRIPT_DIR/toglit.desktop"
+ICON_SRC="$SCRIPT_DIR/icons/toglit.svg"
 
 LOCAL_BIN="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
 DESKTOP_DIR="$HOME/Desktop"
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 
 LEGACY_SCRIPT="$HOME/touch-toggle.sh"
 LEGACY_DESKTOP="$DESKTOP_DIR/Touch.desktop"
@@ -26,6 +28,7 @@ echo
 # ---- Sanity ----
 [[ -f "$TOGLIT_BIN" ]]         || { err "toglit script not found next to installer"; exit 1; }
 [[ -f "$DESKTOP_TEMPLATE" ]] || { err "toglit.desktop template not found";         exit 1; }
+[[ -f "$ICON_SRC" ]]          || { err "icon not found at $ICON_SRC";               exit 1; }
 
 # ---- Make scripts executable ----
 chmod +x "$TOGLIT_BIN" "$SCRIPT_DIR/install.sh"
@@ -49,6 +52,14 @@ render_desktop "$DESKTOP_DIR/toglit.desktop"
 gio set -t string "$DESKTOP_DIR/toglit.desktop" metadata::trusted true 2>/dev/null || true
 ok "installed $APPS_DIR/toglit.desktop"
 ok "installed $DESKTOP_DIR/toglit.desktop (trusted)"
+
+# ---- Install the icon ----
+mkdir -p "$ICON_DIR"
+cp "$ICON_SRC" "$ICON_DIR/toglit.svg"
+# Refresh the icon cache so KDE/GTK pick up the new icon without a logout.
+# Soft-fail: if gtk-update-icon-cache is missing, KDE still resolves the SVG.
+gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+ok "installed $ICON_DIR/toglit.svg"
 
 # ---- Offer to remove legacy files ----
 have_legacy=0

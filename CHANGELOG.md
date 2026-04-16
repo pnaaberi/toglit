@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1.1 — icon + docs
+
+- Ship the TOGLIT icon in the repo (`icons/toglit.svg`); `install.sh` drops
+  it into `~/.local/share/icons/hicolor/scalable/apps/` and refreshes the
+  icon cache, so fresh installs get a themed icon instead of the generic
+  fallback.
+- `.desktop` entries now reference `Icon=toglit` (was `Icon=touch-toggle`,
+  a legacy name from before the rename that only resolved on machines with
+  the prior app installed).
+- `uninstall.sh` also removes the installed icon + refreshes the cache.
+- README: fix stale troubleshooting step that referred to a "Restart panel?"
+  prompt that no longer exists.
+- `toglit` `check_deps`: drop `kquitapp6` (never called by the script), and
+  accept either `qdbus6` or legacy `qdbus`.
+
 ## v1.1.0 — autologin toggle
 
 - **Boot Settings** submenu now has an autologin toggle: enable/disable SDDM's

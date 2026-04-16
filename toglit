@@ -11,7 +11,7 @@ set -euo pipefail
 # rely on for aligning the TUI around em-dashes, middle-dots, box drawing, etc.
 export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 # =============================================================================
 # ASCII splash
@@ -100,7 +100,7 @@ Type=Application
 Categories=Utility;System;
 Comment=Mode + boot switcher designed for Steam Deck's SteamOS Desktop Mode
 Exec=$script_path
-Icon=touch-toggle
+Icon=toglit
 Keywords=touch;toggle;mode;reboot;desktop;steamdeck;steamos;toglit;
 Name=TOGLIT
 Terminal=true

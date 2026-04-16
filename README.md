@@ -232,8 +232,10 @@ set a password, expect a single prompt. The autologin toggle also uses
 
 ## Troubleshooting
 
-- **Panel didn't resize** — answer *yes* to the "Restart panel?" prompt, or
-  run `kquitapp6 plasmashell && setsid plasmashell &`.
+- **Panel didn't resize** — the live plasmashell scripting call may have
+  failed silently. As a fallback, run
+  `kquitapp6 plasmashell && setsid plasmashell &` in a terminal. The panel
+  size also updates correctly on the next login regardless.
 - **pkexec says "Not authorized"** — the `deck` user needs either no password
   or a password you know. Set one with `passwd` in a terminal.
 - **GTK apps still look default-size** — GTK apps only read font settings at

@@ -7,6 +7,7 @@ set -euo pipefail
 LOCAL_BIN="$HOME/.local/bin/toglit"
 APPS_ENTRY="$HOME/.local/share/applications/toglit.desktop"
 DESKTOP_ENTRY="$HOME/Desktop/toglit.desktop"
+ICON_ENTRY="$HOME/.local/share/icons/hicolor/scalable/apps/toglit.svg"
 STATE_DIR="$HOME/.config/toglit"
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -17,12 +18,13 @@ echo
 echo "  Uninstalling TOGLIT..."
 echo
 
-for f in "$LOCAL_BIN" "$APPS_ENTRY" "$DESKTOP_ENTRY"; do
+for f in "$LOCAL_BIN" "$APPS_ENTRY" "$DESKTOP_ENTRY" "$ICON_ENTRY"; do
     if [[ -e "$f" || -L "$f" ]]; then
         rm -f "$f"
         ok "removed $f"
     fi
 done
+gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 echo
 if [[ -d "$STATE_DIR" ]]; then
