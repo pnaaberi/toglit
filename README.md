@@ -83,11 +83,25 @@ into a TUI, with a safety net so you can undo everything.
 
 ## Install
 
+One line. Paste into Konsole on your Deck:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh | bash
+```
+
+That clones the repo to `~/toglit/` (or updates it if already there) and runs
+`install.sh`. Nothing leaves `$HOME`. No sudo.
+
+<details>
+<summary>Manual install</summary>
+
 ```sh
 git clone https://github.com/pnaaberi/toglit.git
 cd toglit
 ./install.sh
 ```
+
+</details>
 
 The installer:
 
@@ -259,4 +273,5 @@ MIT — see [LICENSE](LICENSE).
 
 ## Credits
 
-Written by pnaaberi. Hack-font ASCII logo rendered by hand.
+Written by pnaaberi. ASCII logo rendered with the **Pagga** figlet font; TUI
+text uses the **Hack** font.

@@ -73,7 +73,7 @@ fi
 # ---- Dependency summary ----
 echo
 say "Dependency check:"
-deps=(whiptail kreadconfig6 kwriteconfig6 kquitapp6 steamos-session-select
+deps=(whiptail kreadconfig6 kwriteconfig6 steamos-session-select
       dbus-send xrdb pkexec systemctl qdbus6)
 missing=()
 for c in "${deps[@]}"; do

@@ -235,11 +235,17 @@ QDBUS="$(command -v qdbus6 2>/dev/null || command -v qdbus 2>/dev/null || echo q
 check_deps() {
     local missing=()
     local c
-    for c in whiptail kreadconfig6 kwriteconfig6 kquitapp6 \
+    for c in whiptail kreadconfig6 kwriteconfig6 \
              steamos-session-select dbus-send xrdb pkexec systemctl \
              sed awk find grep cut dirname pgrep pkill passwd; do
         command -v "$c" >/dev/null 2>&1 || missing+=("$c")
     done
+    # qdbus is needed for plasmashell scripting; accept either the Plasma 6
+    # binary (qdbus6) or the legacy name (qdbus). QDBUS resolver above picks
+    # whichever exists.
+    if ! command -v qdbus6 >/dev/null 2>&1 && ! command -v qdbus >/dev/null 2>&1; then
+        missing+=("qdbus6 (or qdbus)")
+    fi
     if (( ${#missing[@]} > 0 )); then
         echo >&2 "toglit: missing required commands: ${missing[*]}"
         echo >&2 "This tool is designed for stock SteamOS (Steam Deck, Plasma 6)."
