@@ -89,8 +89,9 @@ One line. Paste into Konsole on your Deck:
 curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh | bash
 ```
 
-That clones the repo to `~/toglit/` (or updates it if already there) and runs
-`install.sh`. Nothing leaves `$HOME`. No sudo.
+That clones the repo to `~/Projects/toglit/` (or updates it if already there)
+and runs `install.sh`. If you have a legacy clone at `~/toglit/` from an older
+install, bootstrap moves it to the new location. Nothing leaves `$HOME`. No sudo.
 
 <details>
 <summary>Manual install</summary>

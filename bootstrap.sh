@@ -4,13 +4,14 @@
 # Usage (paste into Konsole on your Deck):
 #   curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh | bash
 #
-# Clones the repo to ~/toglit (or updates it if already present) and runs
-# install.sh. Stays inside $HOME. No sudo.
+# Clones the repo to ~/Projects/toglit (or updates it if already present) and
+# runs install.sh. Stays inside $HOME. No sudo.
 
 set -euo pipefail
 
 REPO="https://github.com/pnaaberi/toglit.git"
-DEST="$HOME/toglit"
+DEST="$HOME/Projects/toglit"
+LEGACY_DEST="$HOME/toglit"
 
 say()  { printf '  %s\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -24,6 +25,17 @@ done
 echo
 echo "  TOGLIT bootstrap"
 echo
+
+mkdir -p "$(dirname "$DEST")"
+
+# Migrate a legacy clone from the old $HOME/toglit location.
+if [[ -d "$LEGACY_DEST/.git" && ! -e "$DEST" ]]; then
+    say "migrating legacy clone $LEGACY_DEST → $DEST"
+    mv "$LEGACY_DEST" "$DEST"
+    ok "moved (install.sh will re-point the symlink and .desktop entries)"
+elif [[ -d "$LEGACY_DEST" && -d "$DEST" ]]; then
+    warn "legacy directory $LEGACY_DEST exists alongside $DEST — remove it manually if unwanted"
+fi
 
 if [[ -d "$DEST/.git" ]]; then
     say "found existing clone at $DEST — updating"
