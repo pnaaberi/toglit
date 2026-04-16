@@ -1,0 +1,1334 @@
+#!/usr/bin/env bash
+# toglit — mode switching for Steam Deck Desktop
+# https://github.com/pnaaberi/toglit
+#
+# Toggles KDE Plasma between Touch Mode (finger-friendly) and Desktop Mode,
+# and controls which session SteamOS autologins into on boot.
+
+set -euo pipefail
+
+# UTF-8 locale so Bash's ${#string} counts characters (not bytes), which we
+# rely on for aligning the TUI around em-dashes, middle-dots, box drawing, etc.
+export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
+
+VERSION="1.1.0"
+
+# =============================================================================
+# ASCII splash
+# =============================================================================
+
+print_splash() {
+    # $1 = "animate" (default) for a row-by-row reveal, "static" for instant.
+    local mode="${1:-animate}"
+    local step=0.14      # delay between each ASCII row (reveal)
+    local pause=0.30     # pause between art and slogan
+    local linger=5       # hold the full splash on screen before main menu
+    if [[ "$mode" == "static" ]]; then
+        step=0; pause=0; linger=0
+    fi
+
+    # ANSI — bold cyan for the art, bold bright cyan for the hook, dim for tag.
+    local C_ART=$'\e[1;36m'
+    local C_HOOK=$'\e[1;96m'
+    local C_TAG=$'\e[2;37m'
+    local C_RST=$'\e[0m'
+
+    # Logo: figlet font "Pagga" — half-block + shaded dither glyphs.
+    local rows=(
+        "           ░▀█▀░█▀█░█▀▀░█░░░▀█▀░▀█▀"
+        "           ░░█░░█░█░█░█░█░░░░█░░░█░"
+        "           ░░▀░░▀▀▀░▀▀▀░▀▀▀░▀▀▀░░▀░"
+    )
+
+    # Skip support: each "sleep" is actually a `read -t` — any keypress during
+    # the splash latches `skipped=1`, and every subsequent wait returns
+    # immediately so the main menu appears right away.
+    local skipped=0
+    _hold() {
+        local t="$1"
+        (( skipped )) && return 0
+        [[ "$t" == 0 ]] && return 0
+        if read -rsn1 -t "$t" _skip_key 2>/dev/null; then
+            skipped=1
+        fi
+        return 0
+    }
+
+    printf '\n\n'
+    local r
+    for r in "${rows[@]}"; do
+        printf '%s%s%s\n' "$C_ART" "$r" "$C_RST"
+        _hold "$step"
+    done
+    printf '\n'
+    _hold "$pause"
+    printf '     %sToggle it.%s  %sTouch · Desktop · Reboot.%s\n' \
+        "$C_HOOK" "$C_RST" "$C_TAG" "$C_RST"
+    printf '         %sfor Steam Deck · SteamOS Desktop Mode%s\n' \
+        "$C_TAG" "$C_RST"
+    printf '                      %sv%s%s\n\n' "$C_TAG" "$VERSION" "$C_RST"
+    if [[ "$mode" != "static" ]]; then
+        printf '                %s[ any key to skip ]%s\n' "$C_TAG" "$C_RST"
+    fi
+    _hold "$linger"
+    return 0
+}
+
+# =============================================================================
+# Shortcut (re)installer — baked-in so users who delete the Desktop icon can
+# restore it without reaching for the installer script.
+# =============================================================================
+
+install_shortcut() {
+    local script_path apps_dir desktop_dir tmpl
+    # Resolve to an absolute path that survives PATH lookup + symlinks.
+    # Cover three launch modes: `toglit` (via ~/.local/bin symlink),
+    # `./toglit` (relative), `/abs/path/toglit` (absolute).
+    if [[ "$0" == /* ]]; then
+        script_path="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    else
+        local found
+        found="$(command -v "$0" 2>/dev/null)"
+        script_path="$(readlink -f "$found" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
+    fi
+    apps_dir="$HOME/.local/share/applications"
+    desktop_dir="$HOME/Desktop"
+    mkdir -p "$apps_dir" "$desktop_dir" 2>/dev/null || return 1
+
+    tmpl="[Desktop Entry]
+Type=Application
+Categories=Utility;System;
+Comment=Mode + boot switcher designed for Steam Deck's SteamOS Desktop Mode
+Exec=$script_path
+Icon=touch-toggle
+Keywords=touch;toggle;mode;reboot;desktop;steamdeck;steamos;toglit;
+Name=TOGLIT
+Terminal=true
+"
+    printf '%s' "$tmpl" > "$apps_dir/toglit.desktop" || return 1
+    printf '%s' "$tmpl" > "$desktop_dir/toglit.desktop" || return 1
+    chmod +x "$apps_dir/toglit.desktop" "$desktop_dir/toglit.desktop" 2>/dev/null || true
+    gio set -t string "$desktop_dir/toglit.desktop" metadata::trusted true 2>/dev/null || true
+    return 0
+}
+
+# =============================================================================
+# CLI flags (must run before anything else — allows `toglit --version` on systems
+# missing dependencies, and helps scripted diagnostics)
+# =============================================================================
+
+case "${1:-}" in
+    --version|-v)
+        echo "toglit $VERSION"
+        exit 0
+        ;;
+    --splash)
+        print_splash static
+        exit 0
+        ;;
+    --create-shortcut|--install-shortcut)
+        # --install-shortcut kept as an alias for anyone who learned that flag
+        if install_shortcut; then
+            echo "✓ TOGLIT shortcut created at ~/Desktop/toglit.desktop"
+            exit 0
+        else
+            echo "✗ Failed to create shortcut" >&2
+            exit 1
+        fi
+        ;;
+    --help|-h)
+        cat <<EOF
+toglit $VERSION
+Designed for the Steam Deck's SteamOS Desktop Mode (KDE Plasma 6 / Qt 6).
+Not intended for any other environment.
+
+Usage: toglit [OPTION]
+
+  (no option)        Launch the interactive menu
+  --splash           Print the TOGLIT banner and exit
+  --create-shortcut  Place the TOGLIT icon on the Desktop + app menu
+  --version          Print version and exit
+  --help             Show this help and exit
+EOF
+        exit 0
+        ;;
+esac
+
+# =============================================================================
+# Breeze Dark theme for whiptail
+# =============================================================================
+
+export NEWT_COLORS='
+root=cyan,black
+window=white,black
+border=cyan,black
+shadow=black,black
+title=white,black
+button=black,cyan
+actbutton=black,white
+compactbutton=cyan,black
+checkbox=white,black
+actcheckbox=black,cyan
+listbox=white,black
+actlistbox=black,cyan
+sellistbox=cyan,black
+actsellistbox=black,cyan
+textbox=white,black
+acttextbox=cyan,black
+entry=white,black
+disentry=gray,black
+label=white,black
+helpline=cyan,black
+roottext=cyan,black
+emptyscale=black,black
+fullscale=black,cyan
+'
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+STATE_DIR="$HOME/.config/toglit"
+# Migration chain — older state dirs get moved to STATE_DIR on first run.
+LEGACY_DIRS=("$HOME/.config/flux" "$HOME/.config/touch-toggle")
+STATE_FILE="$STATE_DIR/mode"
+BACKUP_DIR="$STATE_DIR/backup"
+
+KDEGLOBALS="$HOME/.config/kdeglobals"
+KWINRC="$HOME/.config/kwinrc"
+OXYGENRC="$HOME/.config/oxygenrc"
+BREEZERC="$HOME/.config/breezerc"
+DOLPHINRC="$HOME/.config/dolphinrc"
+KCMINPUTRC="$HOME/.config/kcminputrc"
+GTK3_SETTINGS="$HOME/.config/gtk-3.0/settings.ini"
+GTK4_SETTINGS="$HOME/.config/gtk-4.0/settings.ini"
+PLASMASHELLRC="$HOME/.config/plasmashellrc"
+MALIIT_ENV="$HOME/.config/plasma-workspace/env/toglit-im.sh"
+LEGACY_MALIIT_ENVS=(
+    "$HOME/.config/plasma-workspace/env/flux-im.sh"
+    "$HOME/.config/plasma-workspace/env/touch-toggle-im.sh"
+)
+
+SDDM_AUTOLOGIN_CONF="/etc/sddm.conf.d/zz-steamos-autologin.conf"
+# SDDM drops shipped by SteamOS/KDE that each carry their own `User=deck` under
+# [Autologin]. SDDM merges every .conf.d file in alphabetical order, so to
+# actually stop the autologin we must comment `User=` in BOTH — otherwise the
+# surviving one keeps logging `deck` in automatically.
+SDDM_SYSTEM_CONFS=(
+    "/etc/sddm.conf.d/steamos.conf"
+    "/etc/sddm.conf.d/kde_settings.conf"
+)
+
+# Font strings (10-field format; 16-field triggers stack-smash in Qt 6.8)
+TOUCH_FONT="Hack,14,-1,5,400,0,0,0,0,0"
+
+# =============================================================================
+# qdbus resolver — Plasma 6 needs the Qt6 variant
+# =============================================================================
+
+QDBUS="$(command -v qdbus6 2>/dev/null || command -v qdbus 2>/dev/null || echo qdbus)"
+
+# =============================================================================
+# Dependency check
+# =============================================================================
+
+check_deps() {
+    local missing=()
+    local c
+    for c in whiptail kreadconfig6 kwriteconfig6 kquitapp6 \
+             steamos-session-select dbus-send xrdb pkexec systemctl \
+             sed awk find grep cut dirname pgrep pkill passwd; do
+        command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        echo >&2 "toglit: missing required commands: ${missing[*]}"
+        echo >&2 "This tool is designed for stock SteamOS (Steam Deck, Plasma 6)."
+        exit 1
+    fi
+}
+
+check_deps
+
+# =============================================================================
+# State migration (touch-toggle → toglit)
+# =============================================================================
+
+migrate_state() {
+    # Walk the migration chain: first existing legacy dir wins (newer first).
+    # Every step is soft-failing so a read-only / permission-denied $HOME
+    # doesn't kill the script before the user sees any UI.
+    local legacy
+    for legacy in "${LEGACY_DIRS[@]}"; do
+        if [[ -d "$legacy" && ! -d "$STATE_DIR" ]]; then
+            mv "$legacy" "$STATE_DIR" 2>/dev/null || true
+            break
+        fi
+    done
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+}
+
+migrate_state
+
+# =============================================================================
+# Backup / restore
+# =============================================================================
+
+create_backup() {
+    # Soft-failing: if any cp/mkdir fails (disk full, read-only fs,
+    # permission denied), return non-zero so the caller can warn — don't
+    # crash the whole script before the user even sees a menu.
+    if [[ -d "$BACKUP_DIR" ]]; then
+        return 0
+    fi
+    mkdir -p "$BACKUP_DIR" 2>/dev/null || return 1
+    local files=(
+        "$KDEGLOBALS"
+        "$KWINRC"
+        "$OXYGENRC"
+        "$BREEZERC"
+        "$DOLPHINRC"
+        "$KCMINPUTRC"
+        "$GTK3_SETTINGS"
+        "$GTK4_SETTINGS"
+        "$PLASMASHELLRC"
+    )
+    local f rel
+    for f in "${files[@]}"; do
+        if [[ -f "$f" ]]; then
+            rel="${f#$HOME/.config/}"
+            mkdir -p "$BACKUP_DIR/$(dirname "$rel")" 2>/dev/null || return 1
+            cp "$f" "$BACKUP_DIR/$rel" 2>/dev/null || return 1
+        fi
+    done
+    return 0
+}
+
+normalize_kdeglobals_fonts() {
+    # Rewrite any >10-field font strings to 10-field format to avoid the Qt 6.8
+    # stack-smash bug.
+    local font_keys=(font fixed toolBarFont menuFont smallestReadableFont)
+    local key val count family pointsize
+    for key in "${font_keys[@]}"; do
+        val="$(kreadconfig6 --file kdeglobals --group General --key "$key" 2>/dev/null || true)"
+        [[ -z "$val" ]] && continue
+        count=$(awk -F, '{print NF}' <<<"$val")
+        if (( count > 10 )); then
+            family="$(cut -d, -f1 <<<"$val")"
+            pointsize="$(cut -d, -f2 <<<"$val")"
+            kwriteconfig6 --file kdeglobals --group General --key "$key" \
+                "${family},${pointsize},-1,5,400,0,0,0,0,0"
+        fi
+    done
+    val="$(kreadconfig6 --file kdeglobals --group WM --key activeFont 2>/dev/null || true)"
+    if [[ -n "$val" ]]; then
+        count=$(awk -F, '{print NF}' <<<"$val")
+        if (( count > 10 )); then
+            family="$(cut -d, -f1 <<<"$val")"
+            pointsize="$(cut -d, -f2 <<<"$val")"
+            kwriteconfig6 --file kdeglobals --group WM --key activeFont \
+                "${family},${pointsize},-1,5,400,0,0,0,0,0"
+        fi
+    fi
+}
+
+_restore_backup_files() {
+    # Copy every backed-up file back to ~/.config/, normalise fonts to the
+    # 10-field format (dodges Qt 6.8's stack-smash bug), and clear the Qt
+    # virtual-keyboard env drop-in. Returns 1 if no backup exists.
+    [[ -d "$BACKUP_DIR" ]] || return 1
+
+    local f rel dest
+    while IFS= read -r -d '' f; do
+        rel="${f#$BACKUP_DIR/}"
+        dest="$HOME/.config/$rel"
+        mkdir -p "$(dirname "$dest")"
+        cp "$f" "$dest"
+    done < <(find "$BACKUP_DIR" -type f -print0)
+
+    normalize_kdeglobals_fonts
+    force_disable_vkbd
+    return 0
+}
+
+_notify_kde_live() {
+    # Push config-file changes into the running Plasma session without
+    # restarting plasmashell. Preserves any inhibitor locks plasmashell holds
+    # (e.g. a manual "prevent screen sleep" the user toggled on).
+    dbus-send --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange \
+        int32:0 int32:0 2>/dev/null || true
+    dbus-send --type=signal /KIconLoader org.kde.KIconLoader.iconChanged \
+        int32:0 2>/dev/null || true
+    sleep 1
+    "$QDBUS" org.kde.KWin /KWin org.kde.KWin.reconfigure 2>/dev/null || true
+}
+
+restore_backup() {
+    if ! _restore_backup_files; then
+        whiptail --title " Error " --msgbox "\n  No backup found." 7 34
+        return 1
+    fi
+    _notify_kde_live
+    echo "desktop" > "$STATE_FILE"
+    whiptail --title " Restored " --msgbox \
+        "\n  Your original settings are back.\n  (Snapshot from your first Touch Mode toggle.)\n\n  Panel height + GTK apps update on next login." \
+        11 54
+}
+
+# =============================================================================
+# Detect current in-session mode
+# =============================================================================
+
+detect_mode() {
+    if [[ -f "$STATE_FILE" ]]; then
+        cat "$STATE_FILE"
+        return
+    fi
+    local current_font pointsize
+    current_font="$(kreadconfig6 --file kdeglobals --group General --key font 2>/dev/null || true)"
+    pointsize="$(awk -F, '{print $2}' <<<"$current_font")"
+    if [[ "$pointsize" == "14" ]]; then
+        echo "touch"
+    else
+        echo "desktop"
+    fi
+}
+
+# =============================================================================
+# Apply — Touch Mode
+# =============================================================================
+
+apply_touch_fonts() {
+    local font_keys=(font fixed toolBarFont menuFont smallestReadableFont)
+    local key
+    for key in "${font_keys[@]}"; do
+        kwriteconfig6 --file kdeglobals --group General --key "$key" "$TOUCH_FONT"
+    done
+    kwriteconfig6 --file kdeglobals --group WM --key activeFont "$TOUCH_FONT"
+}
+
+apply_touch_gtk() {
+    local ini
+    for ini in "$GTK3_SETTINGS" "$GTK4_SETTINGS"; do
+        if [[ -f "$ini" ]]; then
+            sed -i 's/^gtk-font-name=.*/gtk-font-name=Hack 14/' "$ini"
+        fi
+    done
+}
+
+apply_cursor_env() {
+    # Shared helper: re-publish the user's current cursor theme/size to X,
+    # D-Bus, and ~/.icons/default so running apps pick it up without a reboot.
+    # Never overrides the user's choice.
+    local current_theme current_size
+    current_theme="$(kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme 2>/dev/null || true)"
+    current_size="$(kreadconfig6 --file kcminputrc --group Mouse --key cursorSize 2>/dev/null || true)"
+    [[ -z "$current_size" ]] && current_size="24"
+
+    if [[ -n "$current_theme" ]]; then
+        { echo "Xcursor.theme: $current_theme"; echo "Xcursor.size: $current_size"; } | xrdb -merge 2>/dev/null || true
+        export XCURSOR_THEME="$current_theme" XCURSOR_SIZE="$current_size"
+        dbus-update-activation-environment --systemd XCURSOR_THEME XCURSOR_SIZE 2>/dev/null || true
+        mkdir -p "$HOME/.icons/default"
+        printf '[Icon Theme]\nInherits=%s\n' "$current_theme" > "$HOME/.icons/default/index.theme"
+    fi
+}
+
+apply_touch_cursor() { apply_cursor_env; }
+
+apply_touch_icons() {
+    kwriteconfig6 --file kdeglobals --group ToolbarIcons     --key Size 32
+    kwriteconfig6 --file kdeglobals --group MainToolbarIcons --key Size 32
+    kwriteconfig6 --file kdeglobals --group PanelIcons       --key Size 48
+    kwriteconfig6 --file kdeglobals --group DialogIcons      --key Size 48
+    kwriteconfig6 --file kdeglobals --group SmallIcons       --key Size 22
+    kwriteconfig6 --file kdeglobals --group DesktopIcons     --key Size 64
+}
+
+apply_touch_window_decorations() {
+    kwriteconfig6 --file oxygenrc --group Windeco --key ButtonSize ButtonVeryLarge
+}
+
+apply_touch_panel() {
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+        var panels = panels();
+        for (var i = 0; i < panels.length; i++) {
+            panels[i].height = 64;
+        }
+    " 2>/dev/null || true
+}
+
+apply_touch_desktop_icons() {
+    # iconSize index 3 = huge
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+        var allDesktops = desktops();
+        for (var i = 0; i < allDesktops.length; i++) {
+            var d = allDesktops[i];
+            d.currentConfigGroup = ['General'];
+            d.writeConfig('iconSize', 3);
+        }
+    " 2>/dev/null || true
+}
+
+apply_touch_dolphin() {
+    kwriteconfig6 --file dolphinrc --group IconsMode   --key PreviewSize 64
+    kwriteconfig6 --file dolphinrc --group IconsMode   --key IconSize    64
+    kwriteconfig6 --file dolphinrc --group CompactMode --key PreviewSize 64
+    kwriteconfig6 --file dolphinrc --group CompactMode --key IconSize    64
+}
+
+apply_touch_animation() {
+    kwriteconfig6 --file kdeglobals --group KDE     --key AnimationDurationFactor 0.5
+    kwriteconfig6 --file kdeglobals --group General --key XftHintStyle            hintslight
+    printf "Xft.hintstyle:\thintslight\n" | xrdb -merge - 2>/dev/null || true
+}
+
+apply_touch_single_click() {
+    kwriteconfig6 --file kdeglobals --group KDE --key SingleClick true
+}
+
+apply_touch_scrollbar() {
+    kwriteconfig6 --file breezerc --group Style --key ScrollBarWidth 20
+}
+
+# =============================================================================
+# Force-disable Qt virtual keyboard
+#
+# SteamOS already ships an on-screen keyboard (Steam+X overlay), so
+# qt6-virtualkeyboard is redundant. We proactively delete any env drop-in
+# from this or prior TOGLIT / touch-toggle versions and clear QT_IM_MODULE
+# from the running D-Bus activation environment, so Qt apps stop popping a
+# keyboard on text-field focus without requiring a logout.
+# =============================================================================
+
+force_disable_vkbd() {
+    rm -f "$MALIIT_ENV" "${LEGACY_MALIIT_ENVS[@]}" 2>/dev/null || true
+    dbus-update-activation-environment --systemd QT_IM_MODULE= 2>/dev/null || true
+    pkill -f maliit-server 2>/dev/null || true
+}
+
+# =============================================================================
+# Desktop Mode — live plasmashell resets
+# =============================================================================
+#
+# The config-file side of "Desktop Mode" is handled by copying the backup
+# back (see _restore_backup_files). These two helpers only deal with the
+# running plasmashell: its in-memory panel height and desktop icon size are
+# not re-read from plasmashellrc automatically, so we nudge them via the
+# plasmashell scripting interface. No plasmashell restart needed — so any
+# inhibitor locks plasmashell is holding (e.g. a manual "prevent screen
+# sleep" toggle) survive.
+
+apply_desktop_panel() {
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+        var panels = panels();
+        for (var i = 0; i < panels.length; i++) {
+            panels[i].height = 40;
+        }
+    " 2>/dev/null || true
+}
+
+apply_desktop_desktop_icons() {
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+        var allDesktops = desktops();
+        for (var i = 0; i < allDesktops.length; i++) {
+            var d = allDesktops[i];
+            d.currentConfigGroup = ['General'];
+            d.writeConfig('iconSize', 2);
+        }
+    " 2>/dev/null || true
+}
+
+# =============================================================================
+# Toggles
+# =============================================================================
+
+toggle_touch() {
+    # Snapshot the pristine state on the first toggle (of either direction),
+    # so Desktop Mode / Restore Backup can put things back exactly.
+    create_backup
+
+    echo "Applying Touch Mode settings..."
+    apply_touch_fonts
+    apply_touch_gtk
+    apply_touch_cursor
+    apply_touch_icons
+    apply_touch_window_decorations
+    apply_touch_dolphin
+    apply_touch_animation
+    apply_touch_single_click
+    apply_touch_scrollbar
+
+    _notify_kde_live
+    sleep 1
+
+    # Live panel + desktop-icon size via plasmashell scripting — applies now,
+    # no restart of plasmashell needed (preserves the user's sleep-inhibitor
+    # lock etc.).
+    apply_touch_panel
+    sleep 0.5
+    apply_touch_desktop_icons
+
+    echo "touch" > "$STATE_FILE"
+
+    whiptail --title " Touch Mode Active " --msgbox \
+        "\n  Fonts ............. 14pt\n  Cursor ............ preserved\n  Panel ............. 64px\n  Icons ............. enlarged\n  Window buttons .... very large\n  Scrollbars ........ 20px\n  Single-click ...... on\n\n  GTK apps need restart for changes." \
+        16 50
+}
+
+toggle_desktop() {
+    # "Desktop Mode" = literally rolling back to the pre-Touch snapshot.
+    # If no backup exists yet, take one now (captures the user's true
+    # untouched state) and then the restore is a no-op copy over itself.
+    create_backup
+
+    if ! _restore_backup_files; then
+        whiptail --title " Error " --msgbox \
+            "\n  Could not create or read backup.\n  Check permissions on ~/.config/toglit/." \
+            9 50
+        return 1
+    fi
+
+    _notify_kde_live
+    sleep 1
+
+    # Live panel + desktop-icon reset via plasmashell scripting. Uses sensible
+    # Plasma defaults (height 40, icon index 2). If the user had a custom
+    # panel height pre-Touch, it will match exactly after the next login
+    # (plasmashellrc from the backup has been restored).
+    apply_desktop_panel
+    sleep 0.5
+    apply_desktop_desktop_icons
+
+    echo "desktop" > "$STATE_FILE"
+
+    whiptail --title " Desktop Mode Active " --msgbox \
+        "\n  Your settings are back to how they were\n  before your first Touch Mode toggle.\n\n  Panel + GTK apps update fully on next login." \
+        11 52
+}
+
+# =============================================================================
+# Boot target (SDDM autologin)
+# =============================================================================
+
+get_boot_target() {
+    local sess=""
+    if [[ -r "$SDDM_AUTOLOGIN_CONF" ]]; then
+        sess="$(awk -F= '/^Session[[:space:]]*=/{print $2; exit}' "$SDDM_AUTOLOGIN_CONF" 2>/dev/null || true)"
+        sess="${sess// /}"
+    fi
+    case "$sess" in
+        gamescope-wayland.desktop)           echo "gaming" ;;
+        plasma.desktop|plasmax11.desktop)    echo "desktop" ;;
+        plasma-steamos-oneshot.desktop|\
+        plasma-steamos-wayland-oneshot.desktop) echo "gaming*" ;;
+        "") echo "unset" ;;
+        *) echo "custom" ;;
+    esac
+}
+
+set_boot_target() {
+    # target ∈ {desktop, desktop-once, gaming}
+    #   desktop       — persistent, writes plasma.desktop
+    #   desktop-once  — one-shot, writes plasma-steamos-wayland-oneshot.desktop
+    #                   On next login /usr/bin/startplasma-steamos-oneshot
+    #                   auto-reverts the autologin back to gamescope, so the
+    #                   BOOT AFTER returns to Gaming with no work from the user.
+    #   gaming        — persistent, writes gamescope-wayland.desktop
+    local target="$1"
+    local arg
+    case "$target" in
+        desktop)      arg="plasma-wayland-persistent" ;;
+        desktop-once) arg="plasma-wayland" ;;
+        gaming)       arg="gamescope" ;;
+        *) return 1 ;;
+    esac
+    # --no-restart: keep our session alive; we'll reboot ourselves if asked
+    steamos-session-select "$arg" --no-restart
+}
+
+# Write the persistent default, then re-read /etc/sddm.conf.d/zz-steamos-autologin.conf
+# and tell the user what actually landed. If something else (Steam's "Return to
+# Gaming" hook, the desktop Gaming.desktop shortcut, a one-shot session wrapper)
+# overwrites our write in a race, the mismatch dialog surfaces it immediately
+# instead of the user finding out only after a reboot.
+_commit_default() {
+    local target="$1" human
+    case "$target" in
+        desktop) human="Desktop" ;;
+        gaming)  human="Gaming" ;;
+        *) return 1 ;;
+    esac
+
+    if ! set_boot_target "$target"; then
+        whiptail --title " Error " --msgbox \
+            "\n  Failed to write the autologin config.\n  (Was the pkexec prompt cancelled?)" 9 52
+        return 1
+    fi
+
+    local actual
+    actual="$(get_boot_target)"
+
+    if [[ "$actual" == "$target" ]]; then
+        whiptail --title " Saved ✓ " --msgbox \
+            "\n  Default boot target: $human\n  (verified on disk — zz-steamos-autologin.conf)\n\n  Takes effect on next reboot." \
+            11 56
+    else
+        whiptail --title " Mismatch " --msgbox \
+            "\n  We asked for: $human\n  On-disk now reads: $actual\n\n  Something else overwrote our write.\n  Likely culprits:\n    - Steam's 'Return to Gaming Mode' hook\n    - the Gaming.desktop icon on your Desktop\n    - a Plasma one-shot session wrapper\n\n  For a guaranteed one-time boot to Desktop,\n  pick option 1 instead — it reboots immediately\n  so nothing else has time to interfere." \
+            19 58
+    fi
+}
+
+restart_to() {
+    local target="$1"
+    local title body
+    case "$target" in
+        desktop-once)
+            title=" Reboot to Desktop · just this once "
+            body="\n  Save your work — this will reboot now.\n\n  Next boot opens Plasma Desktop.\n  The boot after that returns to your default.\n\n  Your default boot target is NOT changed.\n\n  Continue?"
+            ;;
+        gaming)
+            title=" Reboot to Gaming · just this once "
+            body="\n  Save your work — this will reboot now.\n\n  Next boot opens Steam's Gaming UI.\n\n  This also sets Gaming as your default\n  boot target if it wasn't already.\n\n  Continue?"
+            ;;
+        *) return 1 ;;
+    esac
+
+    if ! whiptail --title "$title" --yesno "$body" 14 54; then
+        return 0
+    fi
+
+    if ! set_boot_target "$target"; then
+        whiptail --title " Error " --msgbox \
+            "\n  Failed to set boot target.\n  (Was the pkexec prompt cancelled?)" 9 48
+        return 1
+    fi
+    sleep 0.5
+    systemctl reboot
+}
+
+_password_status() {
+    # Returns one of: "set" | "none" | "unknown" on stdout.
+    #   set     — passwd -S reports a usable password (code "P").
+    #   none    — passwd -S reports no password or account locked ("NP" / "L").
+    #             This is the *confirmed* unsafe case — caller must BLOCK, not warn.
+    #   unknown — passwd -S unavailable / refused / unrecognised status code.
+    #             Caller should warn loudly but still let the user proceed.
+    local status code
+    if status="$(passwd -S "$USER" 2>/dev/null)"; then
+        # passwd -S output: <user> <P|NP|L> <date> <min> <max> <warn> <inactive>
+        code="$(awk '{print $2}' <<<"$status")"
+        case "$code" in
+            P)    echo "set";  return ;;
+            NP|L) echo "none"; return ;;
+        esac
+    fi
+    echo "unknown"
+}
+
+_blink_banner() {
+    # Shared blinking terminal banner. $1 = heading (shown in bold red);
+    # $2..$N = body lines (printed one per line, indented). Waits for a
+    # keystroke before returning so the user actually sees it before the
+    # whiptail dialog repaints the screen.
+    #
+    # Many modern terminals (incl. some Konsole profiles) disable ANSI
+    # blink for sanity. The bold red + caps carry the message regardless —
+    # the blink is icing.
+    clear
+    local BLINK=$'\e[1;5;97;41m'   # bold · blink · white on red
+    local RED=$'\e[1;31m'
+    local BOLD=$'\e[1m'
+    local DIM=$'\e[2;37m'
+    local RST=$'\e[0m'
+
+    local heading="$1"; shift
+
+    printf '\n\n'
+    printf '   %s  ! ! !   W A R N I N G   ! ! !  %s\n' "$BLINK" "$RST"
+    printf '\n'
+    printf '   %s%s%s\n' "$RED" "$heading" "$RST"
+    local line
+    for line in "$@"; do
+        if [[ -z "$line" ]]; then
+            printf '\n'
+        else
+            printf '   %s\n' "$line"
+        fi
+    done
+    printf '\n'
+    printf '   %s(some terminals disable blink — the warning is still real)%s\n' "$DIM" "$RST"
+    printf '\n\n'
+    printf '         %s[ press any key to continue ]%s\n' "$BOLD" "$RST"
+    read -rsn1 _ </dev/tty 2>/dev/null || read -rsn1 _ || true
+}
+
+_block_no_password() {
+    # Confirmed: user has no login password. Hard block — show a msgbox
+    # with instructions to set a password, and return. No yesno path.
+    _blink_banner \
+        "THE \"$USER\" USER HAS NO LOGIN PASSWORD." \
+        "" \
+        "Disabling autologin would lock you out of the" \
+        "Deck — there would be no way to log in at the" \
+        "login screen." \
+        "" \
+        "SET A PASSWORD FIRST:" \
+        "  open Konsole and run:    passwd" \
+        "" \
+        "Then come back and try this again."
+
+    whiptail --title " CANNOT DISABLE AUTOLOGIN " --msgbox \
+        "\n  THE '$USER' USER HAS NO LOGIN PASSWORD.\n\n  Disabling autologin would lock you out of\n  the Deck — there would be no way to log in\n  at the login screen.\n\n  Set a password first:\n    open Konsole, run:  passwd\n\n  Then come back and try this again." \
+        16 54
+}
+
+_warn_password_unknown() {
+    # Could not confirm password status (passwd -S refused or returned an
+    # unrecognised code). Warn loudly, default to No, let the user override.
+    _blink_banner \
+        "COULD NOT VERIFY \"$USER\" HAS A LOGIN PASSWORD." \
+        "" \
+        "If there is no password, disabling autologin" \
+        "will LOCK YOU OUT at the login screen." \
+        "" \
+        "Recommended: run 'passwd' in Konsole first" \
+        "to make sure a password is set."
+
+    whiptail --title " PASSWORD STATUS UNKNOWN " --defaultno --yesno \
+        "\n  COULD NOT VERIFY WHETHER '$USER' HAS\n  A LOGIN PASSWORD.\n\n  If not, disabling autologin will LOCK YOU\n  OUT at the login screen.\n\n  Proceed anyway?" \
+        13 54
+}
+
+get_autologin_state() {
+    # "on"  — at least one SDDM drop has an uncommented User=<name> line, so
+    #         SDDM will skip the greeter and log that user straight in.
+    # "off" — every User= line is commented out (or absent). SDDM shows the
+    #         greeter on boot.
+    local f
+    for f in "${SDDM_SYSTEM_CONFS[@]}"; do
+        [[ -r "$f" ]] || continue
+        if grep -qE '^[[:space:]]*User[[:space:]]*=' "$f" 2>/dev/null; then
+            echo "on"
+            return
+        fi
+    done
+    echo "off"
+}
+
+toggle_autologin() {
+    # Flips User= between commented and uncommented in every SDDM drop listed
+    # in SDDM_SYSTEM_CONFS. Uses pkexec so the user gets a graphical auth
+    # prompt — no sudo is cached by TOGLIT, and the edit is a single atomic
+    # sed invocation elevated once.
+    local current new title body
+    current="$(get_autologin_state)"
+
+    # About to DISABLE autologin? Check the user's login password:
+    #   none    — CONFIRMED no password. Hard block (msgbox + return).
+    #   unknown — can't tell. Warn with blink + --defaultno yesno.
+    #   set     — safe to proceed; fall through to the normal confirm.
+    if [[ "$current" == "on" ]]; then
+        case "$(_password_status)" in
+            none)
+                _block_no_password
+                return 0
+                ;;
+            unknown)
+                if ! _warn_password_unknown; then
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+
+    if [[ "$current" == "on" ]]; then
+        new="off"
+        title=" Disable autologin? "
+        body="\n  Currently: autologin ON — the Deck boots\n  straight into your default session.\n\n  After disabling, every power-on shows a\n  login screen. You'll pick the user, enter\n  your password, then pick the session.\n\n  Continue?"
+    else
+        new="on"
+        title=" Enable autologin? "
+        body="\n  Currently: autologin OFF — a login screen\n  shows up on every boot.\n\n  After enabling, the Deck will boot straight\n  into your default session (Desktop or Gaming,\n  whichever you've set) with no password prompt.\n\n  Continue?"
+    fi
+
+    if ! whiptail --title "$title" --yesno "$body" 18 56; then
+        return 0
+    fi
+
+    local sed_expr
+    if [[ "$new" == "off" ]]; then
+        # Comment every uncommented User= line.
+        sed_expr='s/^([[:space:]]*User[[:space:]]*=.*)$/#\1/'
+    else
+        # Uncomment any commented User= line we previously wrote.
+        sed_expr='s/^#([[:space:]]*User[[:space:]]*=.*)$/\1/'
+    fi
+
+    if ! pkexec /usr/bin/sed -i -E "$sed_expr" "${SDDM_SYSTEM_CONFS[@]}"; then
+        whiptail --title " Error " --msgbox \
+            "\n  Failed to update the login settings.\n  (Was the password prompt cancelled, or\n  did the system refuse the action?)" \
+            11 50
+        return 1
+    fi
+
+    local actual human
+    actual="$(get_autologin_state)"
+    if [[ "$actual" == "on" ]]; then human="ENABLED"; else human="DISABLED"; fi
+
+    if [[ "$actual" == "$new" ]]; then
+        whiptail --title " Saved ✓ " --msgbox \
+            "\n  Autologin $human.\n  Takes effect on next reboot." \
+            9 44
+    else
+        whiptail --title " Mismatch " --msgbox \
+            "\n  We asked for: $new\n  On-disk now reads: $actual\n\n  The edit didn't stick. Check the files in\n  /etc/sddm.conf.d/ for stray User= lines." \
+            12 54
+    fi
+}
+
+boot_menu() {
+    while true; do
+        local current al autologin_label autologin_help
+        current="$(get_boot_target)"
+        al="$(get_autologin_state)"
+        if [[ "$al" == "on" ]]; then
+            autologin_label="5  Disable autologin (show login screen)"
+            autologin_help="Currently ON — the Deck boots straight into your default session. Turning it OFF shows a login screen on every power-on: pick the user, type your password, pick the session. Useful if anyone else uses the Deck, or if you want to be explicit about which session starts."
+        else
+            autologin_label="5  Enable autologin (skip login screen)"
+            autologin_help="Currently OFF — a login screen shows up on every boot. Turning it ON makes the Deck log 'deck' in automatically and launch your default session with no password prompt. The stock SteamOS behaviour."
+        fi
+
+        tui_menu \
+            " Boot Settings " \
+            " default: $current   ·   autologin: $al " \
+            "@header:reboot now" "" \
+            "1  Reboot to Desktop · just this once" \
+            "Reboots right now and opens Plasma Desktop. The boot after that auto-returns to whatever your default is. Your default boot target is not changed — this is a one-time trip." \
+            "2  Reboot to Gaming · just this once" \
+            "Reboots right now and opens Steam's Gaming UI. Also sets Gaming as your default if it wasn't already — acts as a quick 'back to normal' button." \
+            "@header:set persistent default" "" \
+            "3  Default boot target: Desktop" \
+            "Makes Plasma Desktop your permanent default. Every power-on from now on opens Desktop until you pick option 4. Nothing reboots now — change applies on next boot." \
+            "4  Default boot target: Gaming" \
+            "Makes Steam's Gaming UI your permanent default (the Deck's factory behaviour). Every power-on opens Gaming. Nothing reboots now — change applies on next boot." \
+            "@header:autologin" "" \
+            "$autologin_label" \
+            "$autologin_help" \
+            "@header:" "" \
+            "6  Back" \
+            "Return to the main TOGLIT menu without changing anything." \
+            || return 0
+
+        case "$REPLY" in
+            1) restart_to desktop-once ;;
+            2) restart_to gaming ;;
+            3) _commit_default desktop ;;
+            4) _commit_default gaming ;;
+            5) toggle_autologin ;;
+            6) return 0 ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Current settings
+# =============================================================================
+
+show_settings() {
+    local mode boot_target autologin backup_status
+    mode="$(detect_mode)"
+    boot_target="$(get_boot_target)"
+    autologin="$(get_autologin_state)"
+    backup_status="none"
+    [[ -d "$BACKUP_DIR" ]] && backup_status="exists"
+
+    whiptail --title " TOGLIT Status " --msgbox \
+        "\n  Session mode ....... $mode\n  Boot target ........ $boot_target\n  Autologin .......... $autologin\n  Backup ............. $backup_status" \
+        11 50
+}
+
+# =============================================================================
+# Repair Desktop Shortcut (wrapper — install_shortcut() is defined near the top)
+# =============================================================================
+
+repair_shortcut() {
+    if install_shortcut; then
+        whiptail --title " Shortcut Created " --msgbox \
+            "\n  TOGLIT icon placed at:\n    ~/Desktop/toglit.desktop\n\n  And registered in the application menu at:\n    ~/.local/share/applications/toglit.desktop\n\n  Double-click the icon to launch TOGLIT." \
+            14 56
+    else
+        whiptail --title " Error " --msgbox \
+            "\n  Failed to create the shortcut.\n  Check permissions on your Desktop folder." \
+            9 50
+    fi
+}
+
+# =============================================================================
+# In-house TUI menu with live help area
+#
+# whiptail has no per-item help text. `dialog --item-help` would, but dialog is
+# not installed on stock SteamOS and adding it requires disabling the read-only
+# filesystem — exactly the kind of "extra shit" we want to avoid.
+#
+# So: render our own menu. Reserved 3-line help area below the list. Arrow keys
+# (+ j/k) navigate, number keys jump, Enter/Space confirm, Esc/Backspace cancel.
+# Help text area is always 3 lines tall — layout never shifts as the highlight
+# moves.
+#
+# Section headers: a label prefixed with "@header:TEXT" renders as a dim
+# dashed separator with TEXT inline, and is skipped during navigation. Its
+# paired "help" argument is ignored (pass "").
+#
+# Usage: tui_menu "TITLE" "SUBTITLE" LABEL1 HELP1 LABEL2 HELP2 ...
+#   On select, $REPLY = the numeric prefix on the chosen label (e.g. "1  Touch
+#   Mode" → REPLY=1). Cancel returns 1.
+# =============================================================================
+
+# Word-wrap stdin to $1 columns, producing one line per output line.
+_tui_wrap() {
+    local width="$1"
+    awk -v w="$width" '
+        {
+            for (i=1; i<=NF; i++) {
+                if (length(line) == 0) {
+                    line = $i
+                } else if (length(line) + 1 + length($i) <= w) {
+                    line = line " " $i
+                } else {
+                    print line
+                    line = $i
+                }
+            }
+        }
+        END { if (length(line)) print line }
+    '
+}
+
+tui_menu() {
+    local title="$1" subtitle="$2"
+    shift 2
+
+    local labels=() helps=()
+    while (( $# >= 2 )); do
+        labels+=("$1")
+        helps+=("$2")
+        shift 2
+    done
+
+    local n=${#labels[@]}
+    local width=62
+    local inner=$((width - 4))     # text cell inside "│  ...  │"
+    local help_h=3                 # reserved help lines — fixed, no layout shift
+
+    # Build a map of selectable indices (skips @header: rows).
+    local items=()
+    local i
+    for ((i = 0; i < n; i++)); do
+        [[ "${labels[i]}" != "@header:"* ]] && items+=("$i")
+    done
+    local item_count=${#items[@]}
+    (( item_count == 0 )) && return 1
+
+    local sel_pos=0            # cursor position within items[]
+    local sel=${items[0]}      # corresponding index in labels[]
+
+    # Colors — cyan/black to match whiptail's Breeze Dark theme
+    local C_RST=$'\e[0m'
+    local C_BOX=$'\e[36m'            # cyan borders
+    local C_TITLE=$'\e[1;30;46m'     # bold black on cyan
+    local C_SUB=$'\e[2;37m'          # dim white
+    local C_SEL=$'\e[30;46m'         # black on cyan (highlight)
+    local C_ITEM=$'\e[97m'           # bright white
+    local C_HELP=$'\e[36m'           # cyan help text
+    local C_HINT=$'\e[2;37m'         # dim hint
+
+    local bar; bar="$(printf '─%.0s' $(seq 1 $((width - 2))))"
+
+    # Pad $1 with spaces on the right to CHARACTER width $2. Bash's ${#s}
+    # counts characters when LC_ALL is UTF-8, so em-dashes/middle-dots/box
+    # glyphs align correctly.
+    _pad() {
+        local s="$1" w="$2"
+        local len=${#s}
+        if (( len >= w )); then
+            printf '%s' "$s"
+        else
+            printf '%s%*s' "$s" "$((w - len))" ''
+        fi
+    }
+
+    _tui_draw() {
+        tput cup 0 0
+        printf '%s┌%s┐%s\n' "$C_BOX" "$bar" "$C_RST"
+        printf '%s│%s %s %s│%s\n' \
+            "$C_BOX" "$C_TITLE" "$(_pad "$title" "$inner")" "$C_RST$C_BOX" "$C_RST"
+        if [[ -n "$subtitle" ]]; then
+            printf '%s│%s %s %s│%s\n' \
+                "$C_BOX" "$C_SUB" "$(_pad "$subtitle" "$inner")" "$C_RST$C_BOX" "$C_RST"
+        else
+            printf '%s│%s│%s\n' "$C_BOX" "$(_pad "" "$((width - 2))")" "$C_RST"
+        fi
+        printf '%s├%s┤%s\n' "$C_BOX" "$bar" "$C_RST"
+
+        # Helper: print an empty row (used for between-section whitespace).
+        _blank_row() {
+            printf '%s│%s│%s\n' "$C_BOX" "$(_pad "" "$((width - 2))")" "$C_RST"
+        }
+
+        local i prefix color head_text head_line dashes
+        local rendered_any=0
+        for ((i = 0; i < n; i++)); do
+            if [[ "${labels[i]}" == "@header:"* ]]; then
+                # Breathing room between sections — blank row before every
+                # header except the first thing drawn.
+                (( rendered_any )) && _blank_row
+
+                # Dim dashed section header.
+                #   "@header:session"  →  "── session ──────────..."
+                #   "@header:"         →  "───────────────────────────" (plain rule)
+                head_text="${labels[i]#@header:}"
+                if [[ -z "$head_text" ]]; then
+                    dashes="$(printf '─%.0s' $(seq 1 $inner))"
+                    printf '%s│%s %s %s│%s\n' \
+                        "$C_BOX" "$C_HINT" "$dashes" "$C_RST$C_BOX" "$C_RST"
+                else
+                    head_line="── ${head_text} "
+                    local dash_count=$(( inner - ${#head_line} ))
+                    (( dash_count < 0 )) && dash_count=0
+                    dashes=""
+                    (( dash_count > 0 )) && dashes="$(printf '─%.0s' $(seq 1 $dash_count))"
+                    printf '%s│%s %s%s %s│%s\n' \
+                        "$C_BOX" "$C_HINT" "$head_line" "$dashes" "$C_RST$C_BOX" "$C_RST"
+                fi
+                rendered_any=1
+                continue
+            fi
+            if (( i == sel )); then
+                prefix="▸ "
+                color="$C_SEL"
+            else
+                prefix="  "
+                color="$C_ITEM"
+            fi
+            printf '%s│%s %s%s %s│%s\n' \
+                "$C_BOX" "$color" "$prefix" \
+                "$(_pad "${labels[i]}" "$((inner - 2))")" \
+                "$C_RST$C_BOX" "$C_RST"
+            rendered_any=1
+        done
+
+        printf '%s│%s│%s\n' "$C_BOX" "$(_pad "" "$((width - 2))")" "$C_RST"
+        printf '%s├%s┤%s\n' "$C_BOX" "$bar" "$C_RST"
+
+        # Help area — exactly $help_h lines, padded with blanks
+        local wrapped=()
+        mapfile -t wrapped < <(printf '%s\n' "${helps[sel]}" | _tui_wrap "$inner")
+        local j line
+        for ((j = 0; j < help_h; j++)); do
+            line="${wrapped[j]:-}"
+            printf '%s│%s %s %s│%s\n' \
+                "$C_BOX" "$C_HELP" "$(_pad "$line" "$inner")" "$C_RST$C_BOX" "$C_RST"
+        done
+
+        printf '%s└%s┘%s\n' "$C_BOX" "$bar" "$C_RST"
+        printf '\n'
+        printf '  %sSteam Deck:  D-pad ↑↓ (move)  ·  A (select)  ·  B (back)%s\n' \
+            "$C_HINT" "$C_RST"
+        printf '\n'
+        printf '  %sKeyboard:    ↑↓ (move)  ·  Enter / Space (select)  ·%s\n' \
+            "$C_HINT" "$C_RST"
+        printf '               %sEsc / Backspace (back)%s' \
+            "$C_HINT" "$C_RST"
+        tput ed  # erase to end of screen — wipes leftovers from larger prior menus
+    }
+
+    clear
+    tput civis 2>/dev/null || true
+
+    # Extract the leading numeric prefix ("1", "12", …) from labels[sel].
+    # Returns 0 (the 1-based position within items) if no number is found.
+    _reply_from_label() {
+        local lbl="${labels[sel]}"
+        if [[ "$lbl" =~ ^([0-9]+) ]]; then
+            REPLY="${BASH_REMATCH[1]}"
+        else
+            REPLY=$((sel_pos + 1))
+        fi
+    }
+
+    local k k2
+    while true; do
+        _tui_draw
+        if ! IFS= read -rsn1 k; then
+            # EOF on stdin (e.g., script piped input). Treat as cancel.
+            tput cnorm 2>/dev/null || true
+            clear
+            return 1
+        fi
+        case "$k" in
+            $'\e')
+                IFS= read -rsn2 -t 0.05 k2 || k2=""
+                case "$k2" in
+                    '[A')   # up arrow — previous selectable item, wrapping
+                        sel_pos=$(( (sel_pos - 1 + item_count) % item_count ))
+                        sel=${items[sel_pos]}
+                        ;;
+                    '[B')   # down arrow — next selectable item, wrapping
+                        sel_pos=$(( (sel_pos + 1) % item_count ))
+                        sel=${items[sel_pos]}
+                        ;;
+                    '')     # bare Esc — only this exits
+                        tput cnorm 2>/dev/null || true
+                        clear
+                        return 1
+                        ;;
+                    # Any other escape (left/right arrow, F-keys, Home/End,
+                    # Page Up/Down, …) — silently ignore.
+                esac
+                ;;
+            ''|$'\n'|$'\r'|' ')  # Enter / Space — Steam Deck A sends Enter
+                tput cnorm 2>/dev/null || true
+                clear
+                _reply_from_label
+                return 0
+                ;;
+            [1-9])
+                # Jump to the selectable item whose label begins with this digit.
+                local p
+                for ((p = 0; p < item_count; p++)); do
+                    if [[ "${labels[items[p]]}" == "$k  "* ]]; then
+                        sel_pos=$p
+                        sel=${items[p]}
+                        tput cnorm 2>/dev/null || true
+                        clear
+                        REPLY=$k
+                        return 0
+                    fi
+                done
+                ;;
+            $'\x7f'|$'\b')  # Backspace — Steam Deck B button commonly maps here
+                tput cnorm 2>/dev/null || true
+                clear
+                return 1
+                ;;
+            j)
+                sel_pos=$(( (sel_pos + 1) % item_count ))
+                sel=${items[sel_pos]}
+                ;;
+            k)
+                sel_pos=$(( (sel_pos - 1 + item_count) % item_count ))
+                sel=${items[sel_pos]}
+                ;;
+            # Anything else (letters, punctuation, stray keystrokes) — ignore.
+            # Only Esc / Backspace / menu-Exit close the app.
+        esac
+    done
+}
+
+# =============================================================================
+# Main menu
+# =============================================================================
+
+main_menu() {
+    while true; do
+        local current_mode boot_target mode_chip
+        current_mode="$(detect_mode)"
+        boot_target="$(get_boot_target)"
+        if [[ "$current_mode" == "touch" ]]; then mode_chip="Touch"; else mode_chip="Desktop"; fi
+
+        tui_menu \
+            " TOGLIT  ·  v$VERSION " \
+            " session: $mode_chip   ·   boot: $boot_target " \
+            "@header:session" "" \
+            "1  Touch Mode" \
+            "Makes everything finger-sized: bigger fonts, larger icons, wider scrollbars, and chunky window buttons. Good for handheld or tablet use. Use Steam's on-screen keyboard (Steam+X) when you need to type." \
+            "2  Desktop Mode" \
+            "Rolls back to your original KDE settings. The snapshot was taken the first time you launched TOGLIT — no opinions imposed, just your setup." \
+            "@header:boot" "" \
+            "3  Boot Settings" \
+            "Pick which mode the Deck always opens on power-on — Desktop or Gaming — with or without rebooting right now. The choice sticks until you change it here again." \
+            "@header:system" "" \
+            "4  Current Status" \
+            "Quick read-only view of what TOGLIT owns: session mode, boot target, and whether a backup exists." \
+            "5  Restore Backup" \
+            "Same effect as Desktop Mode: rolls back to the first-launch snapshot. Kept as a separate entry in case Desktop Mode ever feels broken." \
+            "6  Create Desktop Shortcut" \
+            "Places (or re-places) the TOGLIT icon on your Desktop and in the application menu. Run it the first time to get the icon, or any time later if you accidentally delete it." \
+            "@header:app" "" \
+            "7  Exit" \
+            "Close TOGLIT. Nothing changes on exit. Relaunch from the Desktop icon or by typing 'toglit' in a terminal." \
+            || return 0
+
+        case "$REPLY" in
+            1)
+                if [[ "$current_mode" == "touch" ]]; then
+                    if whiptail --title " Already Active " --yesno \
+                        "\n  Touch Mode is already active.\n  Re-apply settings anyway?" 9 44; then
+                        toggle_touch
+                    fi
+                else
+                    toggle_touch
+                fi
+                ;;
+            2)
+                if [[ "$current_mode" == "desktop" ]]; then
+                    if whiptail --title " Already Active " --yesno \
+                        "\n  Desktop Mode is already active.\n  Re-apply settings anyway?" 9 44; then
+                        toggle_desktop
+                    fi
+                else
+                    toggle_desktop
+                fi
+                ;;
+            3) boot_menu ;;
+            4) show_settings ;;
+            5) restore_backup ;;
+            6) repair_shortcut ;;
+            7) return 0 ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Safety net: ensure plasmashell survives a script exit
+# =============================================================================
+
+cleanup() {
+    tput cnorm 2>/dev/null || true
+    # Only wait + respawn plasmashell if it's actually missing. In the common
+    # case (user just navigated and quit), this is instant.
+    if ! pgrep -x plasmashell >/dev/null 2>&1; then
+        sleep 1.5
+        if ! pgrep -x plasmashell >/dev/null 2>&1; then
+            setsid plasmashell </dev/null &>/dev/null &
+        fi
+    fi
+}
+trap cleanup EXIT
+
+# =============================================================================
+# Entry
+# =============================================================================
+
+print_splash animate
+clear
+
+# First-launch snapshot: captures the user's current KDE config (fonts, cursor,
+# icons, animation, GTK, panel, virtual keyboard) BEFORE anything in this app
+# can modify it. Idempotent — subsequent launches find the backup and skip.
+# Desktop Mode / Restore Backup both roll back to this exact snapshot.
+if ! create_backup; then
+    echo >&2 "toglit: warning — couldn't create backup at $BACKUP_DIR"
+    echo >&2 "toglit: Desktop Mode / Restore Backup won't work until this is fixed."
+    echo >&2 "toglit: check permissions on ~/.config, and free disk space."
+    echo >&2
+fi
+
+# SteamOS already ships its own on-screen keyboard (Steam+X). Scrub any
+# qt6-virtualkeyboard env drop-ins from this or prior versions on every
+# launch so the Qt variant stays off for good.
+force_disable_vkbd
+
+main_menu
