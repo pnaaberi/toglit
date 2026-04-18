@@ -936,12 +936,12 @@ toggle_autologin() {
     fi
 
     if [[ "$current" == "on" ]]; then
-        # Physical-keyboard gate — SDDM's login screen has no virtual keyboard
-        # and the Steam on-screen keyboard is completely unavailable there.
-        # The user must confirm they have physical input before we proceed.
-        if ! whiptail --title " ⚠  Physical keyboard required " \
+        # Keyboard/password gate — SDDM's virtual keyboard works but its
+        # layout switcher is unreliable. Warn the user to use an English-safe
+        # password or have a physical keyboard on hand.
+        if ! whiptail --title " ⚠  Check your password before continuing " \
                 --defaultno --yesno \
-                "\n  THE LOGIN SCREEN HAS NO ON-SCREEN KEYBOARD.\n\n  Once autologin is off, every boot shows a\n  login screen where you must type your\n  password to get in.\n\n  The Steam virtual keyboard does NOT work\n  there — neither does any other on-screen\n  keyboard. You will need a real, physical\n  keyboard plugged in (or paired via\n  Bluetooth) every time you power on.\n\n  If you don't have a physical keyboard\n  readily available, press No and leave\n  autologin enabled.\n\n  I have a physical keyboard and understand\n  I will need it at every login — continue?" \
+                "\n  The login screen has a virtual keyboard,\n  but its language/layout switcher is\n  unreliable — it may not match what you\n  expect.\n\n  RECOMMENDATION: make sure your password\n  only uses plain English characters (A-Z,\n  0-9, basic punctuation) so it works\n  regardless of which layout the keyboard\n  lands on.\n\n  A physical keyboard (USB or Bluetooth)\n  avoids the problem entirely.\n\n  If you get locked out there is no easy\n  way back in without a physical keyboard.\n\n  My password works on a basic English\n  keyboard layout — continue?" \
                 22 62; then
             return 0
         fi
