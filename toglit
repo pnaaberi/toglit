@@ -936,13 +936,14 @@ toggle_autologin() {
     fi
 
     if [[ "$current" == "on" ]]; then
-        # Keyboard/password gate — SDDM's virtual keyboard works but its
-        # layout switcher is unreliable. Warn the user to use an English-safe
-        # password or have a physical keyboard on hand.
+        # Keyboard/password gate — the SDDM login screen has a virtual
+        # keyboard that works and appears to default to English layout.
+        # Physical keyboard is the safest option. Warn the user to confirm
+        # they can type their password before locking themselves out.
         if ! whiptail --title " ⚠  Check your password before continuing " \
                 --defaultno --yesno \
-                "\n  The login screen has a virtual keyboard,\n  but its language/layout switcher is\n  unreliable — it may not match what you\n  expect.\n\n  RECOMMENDATION: make sure your password\n  only uses plain English characters (A-Z,\n  0-9, basic punctuation) so it works\n  regardless of which layout the keyboard\n  lands on.\n\n  A physical keyboard (USB or Bluetooth)\n  avoids the problem entirely.\n\n  If you get locked out there is no easy\n  way back in without a physical keyboard.\n\n  My password works on a basic English\n  keyboard layout — continue?" \
-                22 62; then
+                "\n  The login screen has a virtual keyboard\n  (appears to default to English layout)\n  — it works for most people.\n\n  For best results, a physical keyboard\n  (USB or Bluetooth) is recommended.\n\n  Either way, make sure you can type your\n  password before continuing — if you get\n  locked out, a physical keyboard is the\n  easiest way back in.\n\n  I can type my password at the login\n  screen — continue?" \
+                19 58; then
             return 0
         fi
         new="off"
