@@ -1,7 +1,14 @@
 # TOGLIT
 
+[![Steam Deck only](https://img.shields.io/badge/platform-Steam%20Deck%20only-1a9fff?logo=steam)](https://store.steampowered.com/steamdeck)
 [![CI](https://github.com/pnaaberi/toglit/actions/workflows/ci.yml/badge.svg)](https://github.com/pnaaberi/toglit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> [!CAUTION]
+> **Steam Deck only.** TOGLIT is hardwired to SteamOS — it calls
+> `steamos-session-select`, reads SteamOS-specific SDDM drops, and assumes
+> KDE Plasma 6 on a Valve-shipped image. It will not work on generic Linux
+> desktops, Arch, Ubuntu, or any non-SteamOS machine.
 
 ```
            ░▀█▀░█▀█░█▀▀░█░░░▀█▀░▀█▀
@@ -12,10 +19,6 @@
 ```
 
 Rendered with the **Pagga** figlet font (half-block + dither shading).
-
-**Designed specifically for the Steam Deck's SteamOS Desktop Mode.**
-_Not intended for any other environment — TOGLIT makes hard assumptions
-about KDE Plasma 6, Qt 6, and SteamOS's `steamos-session-select` mechanism._
 
 TOGLIT is a tiny TUI that flips your Steam Deck's Plasma desktop between a
 finger-friendly **Touch Mode** (bigger fonts, larger icons, wider scrollbars,
