@@ -1,5 +1,8 @@
 # TOGLIT
 
+[![CI](https://github.com/pnaaberi/toglit/actions/workflows/ci.yml/badge.svg)](https://github.com/pnaaberi/toglit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 ```
            ░▀█▀░█▀█░█▀▀░█░░░▀█▀░▀█▀
            ░░█░░█░█░█░█░█░░░░█░░░█░
@@ -92,6 +95,20 @@ curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh |
 That clones the repo to `~/Projects/toglit/` (or updates it if already there)
 and runs `install.sh`. If you have a legacy clone at `~/toglit/` from an older
 install, bootstrap moves it to the new location. Nothing leaves `$HOME`. No sudo.
+
+### Reproducible install
+
+Pin to a tag or commit SHA with `TOGLIT_REF` so you know exactly what's
+landing on your Deck:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh \
+  | TOGLIT_REF=v1.2.0 bash
+```
+
+Bootstrap prints the resolved 12-char commit SHA before running
+`install.sh`, and reports whether a version tag is GPG-signed (currently
+an informational warning, not a hard gate).
 
 <details>
 <summary>Manual install</summary>
@@ -269,6 +286,22 @@ before uninstalling.
   toglit --version          print version
   toglit --help             this help
 ```
+
+## Development
+
+```sh
+bash tests/test.sh          # run the helper tests (22 assertions)
+bash -n toglit              # parse the main script
+shellcheck -S warning toglit install.sh uninstall.sh bootstrap.sh
+```
+
+CI (`.github/workflows/ci.yml`) runs all three on every push and PR.
+
+The test harness works by sourcing `toglit` with `TOGLIT_SOURCE_ONLY=1`,
+which loads every helper definition without triggering the splash, menu,
+dependency check, or config writes — so the security-sensitive helpers
+(`_sed_regex_escape`, `_safe_login_user`, the plasma arg clamps) can be
+exercised as pure functions.
 
 ## License
 

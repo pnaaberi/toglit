@@ -1,5 +1,65 @@
 # Changelog
 
+## v1.2.0 — security audit + CI
+
+### Security
+
+- **Autologin toggle no longer interpolates raw `$USER` into a `pkexec`'d
+  sed regex.** Switched to `id -un` with strict POSIX shape validation
+  (`^[a-z_][a-z0-9_-]{0,31}$`) and a dedicated `_sed_regex_escape` helper
+  that escapes every non-alphanumeric character. A username containing
+  regex metachars or sed delimiters can no longer bend the pattern.
+  If the login can't be resolved safely, TOGLIT refuses the edit with a
+  visible error instead of proceeding on a tainted value.
+- **`get_autologin_state` switched from grep-with-interpolation to
+  `awk -v` field comparison** — the captured `User=` value is compared
+  as a literal string, eliminating the regex surface on the username.
+- **`_restore_backup_files`**: quoted the prefix-strip pattern so glob
+  metachars in `$HOME` can't mis-strip and land a backup file outside
+  `~/.config/`. Pre-unlinks any symlink at the destination before `cp`,
+  so a planted symlink can't redirect the write to an arbitrary path.
+- **`normalize_kdeglobals_fonts`**: pointsize parsed from `kdeglobals`
+  is now validated as a plain positive integer before being rewritten.
+  A corrupted or exotic config no longer gets laundered through
+  `kwriteconfig6` unchanged.
+- **Plasma `evaluateScript` helpers (`_plasma_set_panel_height`,
+  `_plasma_set_desktop_icon_size`)**: every value interpolated into a
+  JavaScript blob is validated against a narrow integer range (16..256
+  / 0..6). The scripting surface is now bounded to "integers we chose
+  ourselves" at the type level.
+- **Desktop shortcut uses an absolute `Icon=` path** (both in `install.sh`
+  and the in-script `install_shortcut`). `Icon=toglit` (bare theme
+  lookup) was brittle when the hicolor cache was stale.
+
+### Install
+
+- `bootstrap.sh` supports `TOGLIT_REF` for reproducible installs —
+  pin to a tag or commit SHA:
+  `curl ... | TOGLIT_REF=v1.2.0 bash`.
+  Clones full history (not `--depth=1`), prints the resolved 12-char
+  commit SHA before running `install.sh`, and reports whether a
+  version tag is GPG-signed (soft-fail, informational).
+
+### Engineering
+
+- `.github/workflows/ci.yml` runs `bash -n` parse, `shellcheck`, and a
+  helper test suite on every push / PR.
+- `tests/test.sh` exercises the security helpers (`_sed_regex_escape`,
+  `_safe_login_user`, plasma arg clamps) against both legitimate and
+  hostile inputs. 22 assertions.
+- `TOGLIT_SOURCE_ONLY=1` env guard lets the test harness source the
+  script for function definitions without triggering splash / menu /
+  config writes.
+- Top-level `check_deps` / `migrate_state` calls moved into the entry
+  block (below the source-only guard) — unit-testing safe.
+
+### Icon
+
+- Redesigned to match SteamOS's Gaming Mode icon style (same palette,
+  rim-shadow treatment, chunky silhouette) with a toggle-switch motif.
+  Installer always renders the absolute icon path into both
+  `.desktop` files at install time.
+
 ## v1.1.2 — defensive hardening
 
 All of these are real bugs that don't fire on stock SteamOS (username `deck`,

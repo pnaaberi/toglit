@@ -11,7 +11,7 @@ set -euo pipefail
 # rely on for aligning the TUI around em-dashes, middle-dots, box drawing, etc.
 export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
 
-VERSION="1.1.2"
+VERSION="1.2.0"
 
 # =============================================================================
 # ASCII splash
@@ -80,7 +80,7 @@ print_splash() {
 # =============================================================================
 
 install_shortcut() {
-    local script_path apps_dir desktop_dir tmpl
+    local script_path apps_dir desktop_dir tmpl icon_path
     # Resolve to an absolute path that survives PATH lookup + symlinks.
     # Cover three launch modes: `toglit` (via ~/.local/bin symlink),
     # `./toglit` (relative), `/abs/path/toglit` (absolute).
@@ -95,12 +95,28 @@ install_shortcut() {
     desktop_dir="$HOME/Desktop"
     mkdir -p "$apps_dir" "$desktop_dir" 2>/dev/null || return 1
 
+    # Resolve an absolute icon path — Icon=toglit (bare theme lookup) is
+    # brittle when the hicolor cache is stale. Prefer the installed copy,
+    # fall back to the in-repo SVG, last-ditch the theme name.
+    local candidates=(
+        "$HOME/.local/share/icons/hicolor/scalable/apps/toglit.svg"
+        "$(dirname -- "$script_path")/icons/toglit.svg"
+    )
+    local cand
+    icon_path="toglit"
+    for cand in "${candidates[@]}"; do
+        if [[ -f "$cand" ]]; then
+            icon_path="$cand"
+            break
+        fi
+    done
+
     tmpl="[Desktop Entry]
 Type=Application
 Categories=Utility;System;
 Comment=Mode + boot switcher designed for Steam Deck's SteamOS Desktop Mode
 Exec=$script_path
-Icon=toglit
+Icon=$icon_path
 Keywords=touch;toggle;mode;reboot;desktop;steamdeck;steamos;toglit;
 Name=TOGLIT
 Terminal=true
@@ -239,7 +255,7 @@ check_deps() {
     local c
     for c in whiptail kreadconfig6 kwriteconfig6 \
              steamos-session-select dbus-send xrdb pkexec systemctl \
-             sed awk find grep cut dirname pgrep pkill passwd; do
+             sed awk find grep cut dirname pgrep pkill passwd id; do
         command -v "$c" >/dev/null 2>&1 || missing+=("$c")
     done
     # qdbus is needed for plasmashell scripting; accept either the Plasma 6
@@ -255,7 +271,36 @@ check_deps() {
     fi
 }
 
-check_deps
+# =============================================================================
+# Safe-input helpers for the one privileged sed invocation (autologin toggle)
+# =============================================================================
+
+# Resolve the real login name via the password database (`id -un`), not
+# `$USER` (which is env-controlled). Enforces a strict POSIX username shape
+# (32 char cap, lowercase + digits + _ + -). Returns 1 on anything exotic —
+# we refuse to touch /etc/sddm.conf.d unless we're certain what the user is.
+_safe_login_user() {
+    local u
+    u="$(id -un 2>/dev/null)" || return 1
+    [[ "$u" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || return 1
+    printf '%s' "$u"
+}
+
+# Regex-escape a string for POSIX ERE (`sed -E`). Escapes every character
+# that carries meaning in a pattern, plus `/` so the string is safe to
+# embed in `s/pattern/repl/` without delimiter collisions. Passes through
+# only `[A-Za-z0-9_-]` literally — everything else gets a backslash.
+_sed_regex_escape() {
+    local s="$1" out="" i c
+    for (( i=0; i<${#s}; i++ )); do
+        c="${s:i:1}"
+        case "$c" in
+            [a-zA-Z0-9_-]) out+="$c" ;;
+            *)             out+="\\$c" ;;
+        esac
+    done
+    printf '%s' "$out"
+}
 
 # =============================================================================
 # State migration (touch-toggle → toglit)
@@ -274,8 +319,6 @@ migrate_state() {
     done
     mkdir -p "$STATE_DIR" 2>/dev/null || true
 }
-
-migrate_state
 
 # =============================================================================
 # Backup / restore
@@ -317,7 +360,9 @@ create_backup() {
 
 normalize_kdeglobals_fonts() {
     # Rewrite any >10-field font strings to 10-field format to avoid the Qt 6.8
-    # stack-smash bug.
+    # stack-smash bug. Pointsize is validated as a plain positive integer
+    # before we write it back — we refuse to launder an exotic / corrupted
+    # kdeglobals through kwriteconfig6 unchanged.
     local font_keys=(font fixed toolBarFont menuFont smallestReadableFont)
     local key val count family pointsize
     for key in "${font_keys[@]}"; do
@@ -327,6 +372,7 @@ normalize_kdeglobals_fonts() {
         if (( count > 10 )); then
             family="$(cut -d, -f1 <<<"$val")"
             pointsize="$(cut -d, -f2 <<<"$val")"
+            [[ "$pointsize" =~ ^[0-9]+$ ]] || continue
             kwriteconfig6 --file kdeglobals --group General --key "$key" \
                 "${family},${pointsize},-1,5,400,0,0,0,0,0"
         fi
@@ -337,6 +383,7 @@ normalize_kdeglobals_fonts() {
         if (( count > 10 )); then
             family="$(cut -d, -f1 <<<"$val")"
             pointsize="$(cut -d, -f2 <<<"$val")"
+            [[ "$pointsize" =~ ^[0-9]+$ ]] || return 0
             kwriteconfig6 --file kdeglobals --group WM --key activeFont \
                 "${family},${pointsize},-1,5,400,0,0,0,0,0"
         fi
@@ -351,9 +398,16 @@ _restore_backup_files() {
 
     local f rel dest
     while IFS= read -r -d '' f; do
-        rel="${f#$BACKUP_DIR/}"
+        # Quote the pattern. Unquoted `${f#$BACKUP_DIR/}` would treat
+        # $BACKUP_DIR as a glob pattern, so exotic $HOME values containing
+        # `[`, `*`, `?` could mis-strip and write files outside ~/.config/.
+        rel="${f#"$BACKUP_DIR"/}"
         dest="$HOME/.config/$rel"
         mkdir -p "$(dirname "$dest")"
+        # If a symlink was planted at $dest (e.g. pointing at /etc/...),
+        # `cp` would follow it and overwrite the target. Unlink first so
+        # we always write a regular file at the intended path.
+        [[ -L "$dest" ]] && rm -f "$dest"
         cp "$f" "$dest"
     done < <(find "$BACKUP_DIR" -type f -print0)
 
@@ -460,26 +514,29 @@ apply_touch_window_decorations() {
     kwriteconfig6 --file oxygenrc --group Windeco --key ButtonSize ButtonVeryLarge
 }
 
-apply_touch_panel() {
-    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-        var panels = panels();
-        for (var i = 0; i < panels.length; i++) {
-            panels[i].height = 64;
-        }
-    " 2>/dev/null || true
+# plasmashell.evaluateScript wrappers. Both take a single integer, validated
+# to a narrow range, before any string concatenation. This bounds the only
+# thing we interpolate into a JavaScript blob to "integers we chose
+# ourselves", so the scripting surface stays auditable as the callers grow.
+_plasma_set_panel_height() {
+    local h="$1"
+    [[ "$h" =~ ^[0-9]+$ ]] && (( h >= 16 && h <= 256 )) || return 1
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+        "var ps=panels(); for (var i=0;i<ps.length;i++) ps[i].height=$h;" \
+        2>/dev/null || true
 }
 
-apply_touch_desktop_icons() {
-    # iconSize index 3 = huge
-    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-        var allDesktops = desktops();
-        for (var i = 0; i < allDesktops.length; i++) {
-            var d = allDesktops[i];
-            d.currentConfigGroup = ['General'];
-            d.writeConfig('iconSize', 3);
-        }
-    " 2>/dev/null || true
+_plasma_set_desktop_icon_size() {
+    # iconSize indexes are Plasma's "size categories" (0..6). Narrowly clamped.
+    local s="$1"
+    [[ "$s" =~ ^[0-6]$ ]] || return 1
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+        "var ds=desktops(); for (var i=0;i<ds.length;i++){var d=ds[i]; d.currentConfigGroup=['General']; d.writeConfig('iconSize', $s);}" \
+        2>/dev/null || true
 }
+
+apply_touch_panel()         { _plasma_set_panel_height 64; }
+apply_touch_desktop_icons() { _plasma_set_desktop_icon_size 3; }
 
 apply_touch_dolphin() {
     kwriteconfig6 --file dolphinrc --group IconsMode   --key PreviewSize 64
@@ -530,25 +587,8 @@ force_disable_vkbd() {
 # inhibitor locks plasmashell is holding (e.g. a manual "prevent screen
 # sleep" toggle) survive.
 
-apply_desktop_panel() {
-    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-        var panels = panels();
-        for (var i = 0; i < panels.length; i++) {
-            panels[i].height = 40;
-        }
-    " 2>/dev/null || true
-}
-
-apply_desktop_desktop_icons() {
-    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-        var allDesktops = desktops();
-        for (var i = 0; i < allDesktops.length; i++) {
-            var d = allDesktops[i];
-            d.currentConfigGroup = ['General'];
-            d.writeConfig('iconSize', 2);
-        }
-    " 2>/dev/null || true
-}
+apply_desktop_panel()         { _plasma_set_panel_height 40; }
+apply_desktop_desktop_icons() { _plasma_set_desktop_icon_size 2; }
 
 # =============================================================================
 # Toggles
@@ -724,10 +764,14 @@ _password_status() {
     #   set     — passwd -S reports a usable password (code "P").
     #   none    — passwd -S reports no password or account locked ("NP" / "L").
     #             This is the *confirmed* unsafe case — caller must BLOCK, not warn.
-    #   unknown — passwd -S unavailable / refused / unrecognised status code.
-    #             Caller should warn loudly but still let the user proceed.
-    local status code
-    if status="$(passwd -S "$USER" 2>/dev/null)"; then
+    #   unknown — passwd -S unavailable / refused / unrecognised status code,
+    #             or we couldn't resolve a safe login name.
+    local user status code
+    if ! user="$(_safe_login_user)"; then
+        echo "unknown"
+        return
+    fi
+    if status="$(passwd -S "$user" 2>/dev/null)"; then
         # passwd -S output: <user> <P|NP|L> <date> <min> <max> <warn> <inactive>
         code="$(awk '{print $2}' <<<"$status")"
         case "$code" in
@@ -778,8 +822,10 @@ _blink_banner() {
 _block_no_password() {
     # Confirmed: user has no login password. Hard block — show a msgbox
     # with instructions to set a password, and return. No yesno path.
+    local user
+    user="$(_safe_login_user || echo 'your')"
     _blink_banner \
-        "THE \"$USER\" USER HAS NO LOGIN PASSWORD." \
+        "THE \"$user\" USER HAS NO LOGIN PASSWORD." \
         "" \
         "Disabling autologin would lock you out of the" \
         "Deck — there would be no way to log in at the" \
@@ -791,15 +837,17 @@ _block_no_password() {
         "Then come back and try this again."
 
     whiptail --title " CANNOT DISABLE AUTOLOGIN " --msgbox \
-        "\n  THE '$USER' USER HAS NO LOGIN PASSWORD.\n\n  Disabling autologin would lock you out of\n  the Deck — there would be no way to log in\n  at the login screen.\n\n  Set a password first:\n    open Konsole, run:  passwd\n\n  Then come back and try this again." \
+        "\n  THE '$user' USER HAS NO LOGIN PASSWORD.\n\n  Disabling autologin would lock you out of\n  the Deck — there would be no way to log in\n  at the login screen.\n\n  Set a password first:\n    open Konsole, run:  passwd\n\n  Then come back and try this again." \
         16 54
 }
 
 _warn_password_unknown() {
     # Could not confirm password status (passwd -S refused or returned an
     # unrecognised code). Warn loudly, default to No, let the user override.
+    local user
+    user="$(_safe_login_user || echo 'your')"
     _blink_banner \
-        "COULD NOT VERIFY \"$USER\" HAS A LOGIN PASSWORD." \
+        "COULD NOT VERIFY \"$user\" HAS A LOGIN PASSWORD." \
         "" \
         "If there is no password, disabling autologin" \
         "will LOCK YOU OUT at the login screen." \
@@ -808,24 +856,36 @@ _warn_password_unknown() {
         "to make sure a password is set."
 
     whiptail --title " PASSWORD STATUS UNKNOWN " --defaultno --yesno \
-        "\n  COULD NOT VERIFY WHETHER '$USER' HAS\n  A LOGIN PASSWORD.\n\n  If not, disabling autologin will LOCK YOU\n  OUT at the login screen.\n\n  Proceed anyway?" \
+        "\n  COULD NOT VERIFY WHETHER '$user' HAS\n  A LOGIN PASSWORD.\n\n  If not, disabling autologin will LOCK YOU\n  OUT at the login screen.\n\n  Proceed anyway?" \
         13 54
 }
 
 get_autologin_state() {
-    # Scoped to the current user ($USER) so TOGLIT never claims autologin
-    # is "on" for a different account on multi-user systems.
+    # Scoped to the current user so TOGLIT never claims autologin is "on"
+    # for a different account on multi-user systems.
     #
-    # "on"  — at least one SDDM drop has an uncommented "User=$USER" line,
-    #         so SDDM will skip the greeter and log $USER straight in.
+    # "on"  — at least one SDDM drop has an uncommented "User=<me>" line,
+    #         so SDDM will skip the greeter and log us straight in.
     # "off" — no such line. SDDM either shows the greeter or auto-logs a
-    #         different user — both count as "off" from $USER's point of
-    #         view.
+    #         different user — both count as "off" from our point of view.
+    #
+    # Field-compare via awk: the username is fed in as -v and compared to
+    # the captured value as a literal string. No regex surface — a
+    # username containing regex metachars can't bend the match.
+    local user
+    user="$(_safe_login_user)" || { echo "off"; return; }
     local f
     for f in "${SDDM_SYSTEM_CONFS[@]}"; do
         [[ -r "$f" ]] || continue
-        if grep -qE "^[[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*\$" \
-                "$f" 2>/dev/null; then
+        if awk -v u="$user" '
+            /^[[:space:]]*User[[:space:]]*=[[:space:]]*/ {
+                val = $0
+                sub(/^[[:space:]]*User[[:space:]]*=[[:space:]]*/, "", val)
+                sub(/[[:space:]]+$/, "", val)
+                if (val == u) { found = 1; exit }
+            }
+            END { exit !found }
+        ' "$f" 2>/dev/null; then
             echo "on"
             return
         fi
@@ -838,6 +898,22 @@ toggle_autologin() {
     # in SDDM_SYSTEM_CONFS. Uses pkexec so the user gets a graphical auth
     # prompt — no sudo is cached by TOGLIT, and the edit is a single atomic
     # sed invocation elevated once.
+    #
+    # Safety: we NEVER interpolate the raw $USER into the sed pattern. Instead
+    # we resolve the login via `id -un`, validate it matches a strict POSIX
+    # username shape, then regex-escape it. A username containing metachars
+    # cannot bend the pattern or the /s/a/b/ delimiters, and a missing/exotic
+    # username aborts with a user-visible error — we will not run sed under
+    # pkexec on a value we couldn't confirm.
+    local user user_re
+    if ! user="$(_safe_login_user)"; then
+        whiptail --title " Error " --msgbox \
+            "\n  Couldn't resolve a safe login name for your\n  user. Refusing to edit /etc/sddm.conf.d.\n\n  Set USER via a normal login (not a shell\n  override) and try again." \
+            11 54
+        return 1
+    fi
+    user_re="$(_sed_regex_escape "$user")"
+
     local current new title body
     current="$(get_autologin_state)"
 
@@ -875,14 +951,14 @@ toggle_autologin() {
 
     local sed_expr
     if [[ "$new" == "off" ]]; then
-        # Comment only OUR User=$USER line — leave any other user's
-        # autologin config alone on multi-user systems.
-        sed_expr="s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*)\$/#\\1/"
+        # Comment only OUR User= line — leave any other user's autologin
+        # config alone on multi-user systems.
+        sed_expr="s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)\$/#\\1/"
     else
-        # Uncomment a commented #User=$USER line we (or SDDM defaults)
-        # previously wrote. If no such line exists, the edit is a no-op
-        # and the mismatch dialog below fires.
-        sed_expr="s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${USER}[[:space:]]*)\$/\\1/"
+        # Uncomment a commented #User= line we (or SDDM defaults) previously
+        # wrote. If no such line exists, the edit is a no-op and the
+        # mismatch dialog below fires.
+        sed_expr="s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)\$/\\1/"
     fi
 
     if ! pkexec /usr/bin/sed -i -E "$sed_expr" "${SDDM_SYSTEM_CONFS[@]}"; then
@@ -1334,11 +1410,26 @@ cleanup() {
         fi
     fi
 }
-trap cleanup EXIT
-
 # =============================================================================
 # Entry
 # =============================================================================
+#
+# TOGLIT_SOURCE_ONLY=1 lets the test harness `source` this file to get every
+# helper definition without side effects (no dep check, no migration, no
+# splash, no backup, no menu). The harness sets it; nothing else does.
+
+if [[ -n "${TOGLIT_SOURCE_ONLY:-}" ]]; then
+    # When sourced, `return 0` exits this file; when executed, `return`
+    # fails and `exit 0` runs. Not dead code — shellcheck can't see the
+    # dual-invocation pattern.
+    # shellcheck disable=SC2317
+    return 0 2>/dev/null || exit 0
+fi
+
+trap cleanup EXIT
+
+check_deps
+migrate_state
 
 print_splash animate
 clear
