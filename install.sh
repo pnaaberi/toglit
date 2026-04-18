@@ -12,6 +12,7 @@ LOCAL_BIN="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
 DESKTOP_DIR="$HOME/Desktop"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+ICON_DEST="$ICON_DIR/toglit.svg"
 
 LEGACY_SCRIPT="$HOME/touch-toggle.sh"
 LEGACY_DESKTOP="$DESKTOP_DIR/Touch.desktop"
@@ -40,15 +41,23 @@ mkdir -p "$LOCAL_BIN"
 ln -sfn "$TOGLIT_BIN" "$LOCAL_BIN/toglit"
 ok "linked $LOCAL_BIN/toglit → $TOGLIT_BIN"
 
-# ---- Render .desktop files (substitute absolute Exec path) ----
+# ---- Install the icon (must run before desktop rendering so the
+#      absolute path we bake into Icon= exists at launch time) ----
+mkdir -p "$ICON_DIR"
+cp "$ICON_SRC" "$ICON_DEST"
+gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+ok "installed $ICON_DEST"
+
+# ---- Render .desktop files (substitute absolute Exec + Icon paths) ----
 mkdir -p "$APPS_DIR" "$DESKTOP_DIR"
 render_desktop() {
-    # awk with `-v` passes the replacement as a literal string, so paths
+    # awk with `-v` passes replacements as literal strings, so paths
     # containing `|`, `&`, `\` (which would break a sed replacement) are
     # substituted verbatim.
     local dest="$1"
-    awk -v bin="$TOGLIT_BIN" '{ gsub(/__TOGLIT_EXEC__/, bin) } 1' \
-        "$DESKTOP_TEMPLATE" > "$dest"
+    awk -v bin="$TOGLIT_BIN" -v icon="$ICON_DEST" '
+        { gsub(/__TOGLIT_EXEC__/, bin); gsub(/__TOGLIT_ICON__/, icon); print }
+    ' "$DESKTOP_TEMPLATE" > "$dest"
     chmod +x "$dest"
 }
 render_desktop "$APPS_DIR/toglit.desktop"
@@ -56,14 +65,6 @@ render_desktop "$DESKTOP_DIR/toglit.desktop"
 gio set -t string "$DESKTOP_DIR/toglit.desktop" metadata::trusted true 2>/dev/null || true
 ok "installed $APPS_DIR/toglit.desktop"
 ok "installed $DESKTOP_DIR/toglit.desktop (trusted)"
-
-# ---- Install the icon ----
-mkdir -p "$ICON_DIR"
-cp "$ICON_SRC" "$ICON_DIR/toglit.svg"
-# Refresh the icon cache so KDE/GTK pick up the new icon without a logout.
-# Soft-fail: if gtk-update-icon-cache is missing, KDE still resolves the SVG.
-gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
-ok "installed $ICON_DIR/toglit.svg"
 
 # ---- Offer to remove legacy files ----
 have_legacy=0
