@@ -236,6 +236,13 @@ set a password, expect a single prompt. The autologin toggle also uses
   comments the line in both at once with a single `pkexec sed`. Re-enabling
   uncomments the same lines. No config is created or deleted, only a leading
   `#` is added or removed.
+  > **Non-`deck` usernames:** TOGLIT resolves the current login via `id -un`
+  > and searches for that name in the SteamOS-shipped conf files. Because
+  > Valve hardcodes `User=deck` in those files, the autologin toggle is a
+  > no-op for any other username — the mismatch dialog will fire. Boot-target
+  > switching (`steamos-session-select`) is unaffected and works for any user.
+  > This mirrors SteamOS itself, which treats `deck` as the only supported
+  > login account.
 - **Backup** is taken the **first time you launch TOGLIT**, before the app has
   touched anything. It snapshots `kdeglobals`, `kwinrc`, `oxygenrc`, `breezerc`,
   `dolphinrc`, `kcminputrc`, `gtk-3.0/settings.ini`, `gtk-4.0/settings.ini`,
@@ -256,6 +263,13 @@ set a password, expect a single prompt. The autologin toggle also uses
   size also updates correctly on the next login regardless.
 - **pkexec says "Not authorized"** — the `deck` user needs either no password
   or a password you know. Set one with `passwd` in a terminal.
+- **Autologin toggle does nothing / mismatch dialog** — your login name is
+  not `deck`. The SteamOS-shipped SDDM conf files hardcode `User=deck`, so
+  TOGLIT cannot comment or uncomment the line for a different account. Fix:
+  manually edit `/etc/sddm.conf.d/steamos.conf` and
+  `/etc/sddm.conf.d/kde_settings.conf` — change `User=deck` to your
+  username, then use TOGLIT's autologin toggle normally. Boot-target
+  switching is unaffected.
 - **GTK apps still look default-size** — GTK apps only read font settings at
   launch. Quit and reopen them.
 - **I messed something up** — `toglit` → *Restore Backup* puts things back
