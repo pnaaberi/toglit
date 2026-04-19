@@ -1442,34 +1442,28 @@ _onboarding_mark_done() {
 # ── Step helpers ─────────────────────────────────────────────────────────────
 
 _ob_autologin() {
-    # Detect and repair the broken-autologin state produced by SteamOS's
-    # volatile overlay wiping User=deck from /etc/sddm.conf.d/.
     local al
     al="$(get_autologin_state)"
 
     if [[ "$al" == "on" ]]; then
-        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+        whiptail --title " Step 1 of 3 · Autologin " --msgbox \
             "\n  ✓  Autologin is already working.\n\n  Your Deck will boot straight into Gaming\n  or Desktop Mode without a login screen." \
             11 54
         return 0
     fi
 
     if _autologin_is_broken; then
-        # The autologin mechanism itself is broken — SDDM has a non-existent
-        # placeholder user so it always fails and falls back to the greeter,
-        # regardless of whether the user wants a login screen or not. Offer
-        # to repair the mechanism; leave the on/off choice to the user.
-        if ! whiptail --title " Step 1 of 4 · Autologin " --yesno \
+        if ! whiptail --title " Step 1 of 3 · Autologin " --yesno \
             "\n  TOGLIT found a SteamOS misconfiguration:\n  the autologin user is set to a placeholder\n  account that doesn't exist. This means the\n  Deck always fails autologin silently, then\n  shows the greeter — even if you'd prefer\n  a direct boot.\n\n  Repair it now? This fixes the mechanism\n  but doesn't force autologin on — you can\n  turn it on or off in Boot Settings after." \
             18 60 --yes-button "Repair" --no-button "Skip"; then
+            _ob_warn_no_password_if_needed
             return 0
         fi
     else
-        # Autologin is off but not broken — user or a previous tool disabled
-        # it intentionally. Just ask, no pressure either way.
-        if ! whiptail --title " Step 1 of 4 · Autologin " --yesno \
+        if ! whiptail --title " Step 1 of 3 · Autologin " --yesno \
             "\n  Autologin is currently OFF.\n\n  OFF — every boot shows a login screen.\n        You pick the session and type your\n        password each time.\n\n  ON  — the Deck boots straight into your\n        chosen mode with no password prompt.\n        (This is the factory default.)\n\n  Turn autologin ON?" \
             18 58 --yes-button "Turn ON" --no-button "Leave OFF"; then
+            _ob_warn_no_password_if_needed
             return 0
         fi
     fi
@@ -1482,21 +1476,31 @@ _ob_autologin() {
         return 0
     }
 
-    whiptail --title " Step 1 of 4 · Autologin " --infobox \
+    whiptail --title " Step 1 of 3 · Autologin " --infobox \
         "\n  Fixing autologin — you may see a\n  password prompt. Please approve it." \
         7 48
 
     _autologin_write_persistent "$user"
 
     if [[ "$(get_autologin_state)" == "on" ]]; then
-        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+        whiptail --title " Step 1 of 3 · Autologin " --msgbox \
             "\n  ✓  Autologin fixed and saved.\n\n  The Deck will now boot straight into\n  your chosen mode without a login screen.\n  This survives SteamOS updates." \
             12 54
     else
-        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+        whiptail --title " Step 1 of 3 · Autologin " --msgbox \
             "\n  The fix didn't fully apply — possibly\n  because the password prompt was cancelled.\n\n  You can retry later from:\n  Boot Settings → Enable autologin." \
             13 54
+        _ob_warn_no_password_if_needed
     fi
+}
+
+# Warn about no password only when autologin is (or will remain) OFF —
+# the only scenario where a missing password causes a lockout.
+_ob_warn_no_password_if_needed() {
+    [[ "$(_password_status)" == "set" ]] && return 0
+    whiptail --title " ⚠  No password set " --msgbox \
+        "\n  Your account has no password, and\n  autologin is OFF.\n\n  If you reboot now the login screen will\n  appear but there's no password to type —\n  you'd be locked out.\n\n  Set a password before rebooting:\n  open Konsole and run:  passwd" \
+        15 54
 }
 
 _ob_boot_target() {
@@ -1528,29 +1532,12 @@ _ob_boot_target() {
             10 50
 }
 
-_ob_password() {
-    local status
-    status="$(_password_status)"
-
-    if [[ "$status" == "set" ]]; then
-        whiptail --title " Step 3 of 4 · Password " --msgbox \
-            "\n  ✓  Your account has a password set.\n\n  If you ever turn autologin off, you'll\n  be able to log in at the login screen." \
-            11 54
-        return 0
-    fi
-
-    # No password — explain the specific risk (login screen lockout only).
-    whiptail --title " Step 3 of 4 · Password " --msgbox \
-        "\n  Your account has NO password.\n\n  This only matters if you ever disable\n  autologin — the login screen would appear\n  but there'd be no password to type, and\n  you'd be locked out.\n\n  Everything else in TOGLIT works fine\n  without a password.\n\n  To set one before disabling autologin:\n  open Konsole and run:  passwd" \
-        18 56
-}
-
 _ob_shortcut() {
-    if whiptail --title " Step 4 of 4 · Desktop Shortcut " --yesno \
+    if whiptail --title " Step 3 of 3 · Desktop Shortcut " --yesno \
         "\n  Create a TOGLIT icon on your Desktop\n  so you can relaunch it without opening\n  a terminal?\n\n  (Recommended — you can always delete it\n  later from the Desktop.)" \
         14 54 --yes-button "Create shortcut" --no-button "Skip"; then
         install_shortcut && \
-            whiptail --title " Step 4 of 4 · Desktop Shortcut " --msgbox \
+            whiptail --title " Step 3 of 3 · Desktop Shortcut " --msgbox \
                 "\n  ✓  TOGLIT icon placed on your Desktop\n  and registered in the app menu.\n\n  Double-click it any time to reopen TOGLIT." \
                 12 54
     fi
@@ -1563,14 +1550,25 @@ _ob_summary() {
     pw="$(_password_status)"
     [[ -f "$HOME/Desktop/toglit.desktop" ]] && shortcut_status="created" || shortcut_status="skipped"
 
-    local al_line boot_line pw_line sc_line
-    [[ "$al"   == "on"  ]] && al_line="  ✓  Autologin ........... ON"   || al_line="  ✗  Autologin ........... OFF (login screen on boot)"
+    local al_line boot_line sc_line pw_line body
+    [[ "$al" == "on" ]] && al_line="  ✓  Autologin ........... ON" \
+                        || al_line="  –  Autologin ........... OFF (login screen on boot)"
     boot_line="  ✓  Default boot ........ ${boot^}"
-    [[ "$pw"   == "set" ]] && pw_line="  ✓  Account password .... set" || pw_line="  ⚠  Account password .... not set (set with: passwd)"
-    [[ "$shortcut_status" == "created" ]] && sc_line="  ✓  Desktop shortcut .... created" || sc_line="  –  Desktop shortcut .... skipped"
+    [[ "$shortcut_status" == "created" ]] \
+        && sc_line="  ✓  Desktop shortcut .... created" \
+        || sc_line="  –  Desktop shortcut .... skipped"
+
+    body="\n  All done! Here's your current state:\n\n${al_line}\n${boot_line}\n${sc_line}"
+
+    # Only surface password status when it's actionable: autologin is off
+    # and no password means the user could get locked out.
+    if [[ "$al" == "off" && "$pw" != "set" ]]; then
+        pw_line="  ⚠  No password set — run 'passwd' before disabling autologin"
+        body="${body}\n${pw_line}"
+    fi
 
     whiptail --title " Setup complete " --msgbox \
-        "\n  All done! Here's your current state:\n\n${al_line}\n${boot_line}\n${pw_line}\n${sc_line}\n\n  TOGLIT is now in your app menu.\n  Main features:\n    · Touch Mode  — finger-friendly Plasma\n    · Boot Settings — switch Gaming/Desktop\n    · Restore Backup — undo all TOGLIT changes" \
+        "${body}\n\n  Main features:\n    · Touch Mode  — finger-friendly Plasma\n    · Boot Settings — switch Gaming/Desktop\n    · Restore Backup — undo all TOGLIT changes" \
         23 62
 }
 
@@ -1588,8 +1586,6 @@ run_onboarding() {
     _ob_autologin
     clear
     _ob_boot_target
-    clear
-    _ob_password
     clear
     _ob_shortcut
     clear
