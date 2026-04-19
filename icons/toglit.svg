@@ -1,0 +1,45 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient id="a"><stop offset="0" stop-color="#1a1030"/><stop offset="1" stop-color="#2d1f4e"/></linearGradient>
+    <linearGradient id="b"><stop offset="0" stop-color="#9d7cd8"/><stop offset="1" stop-color="#d4bfff"/></linearGradient>
+    <linearGradient id="c"><stop offset="0" stop-color="#241845"/><stop offset="1" stop-color="#3d2a6b"/></linearGradient>
+    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="32" x2="32" y1="48" y2="20"><stop offset="0" stop-color="#7957c2"/><stop offset=".35" stop-color="#9d7cd8"/><stop offset="1" stop-color="#d4bfff"/></linearGradient>
+    <linearGradient id="track" gradientUnits="userSpaceOnUse" x1="32" x2="32" xlink:href="#c" y1="44" y2="24"/>
+    <linearGradient id="knob" gradientUnits="userSpaceOnUse" x1="44" x2="44" xlink:href="#b" y1="43" y2="25"/>
+    <radialGradient id="glowL" cx="387.57" cy="537.57" gradientTransform="matrix(4 .00042 -.00224 21 -1543.06 -11237)" gradientUnits="userSpaceOnUse" r="1" xlink:href="#a"/>
+    <radialGradient id="glowR" cx="387.57" cy="537.57" gradientTransform="matrix(-4 .00002 .00014 21 1608.26 -11236.8)" gradientUnits="userSpaceOnUse" r="1" xlink:href="#a"/>
+    <radialGradient id="touch" cx="44" cy="34" r="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#d4bfff" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#7957c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g fill-rule="evenodd">
+
+    <!-- Toggle body: chunky rounded-rect like the gaming controller silhouette -->
+    <path d="M13 20h38a9 14 0 0 1 9 14 9 14 0 0 1-9 14H13a9 14 0 0 1-9-14 9 14 0 0 1 9-14z" fill="url(#body)"/>
+
+    <!-- Lower rim shadow (mirrors the gaming icon's rim shadow pass) -->
+    <path d="M13 47a9 14 0 0 1-9-14v1a9 14 0 0 0 9 14h38a9 14 0 0 0 9-14v-1a9 14 0 0 1-9 14z" fill="#2d1f4e" opacity=".25"/>
+
+    <!-- Side "trigger" shadow gradients, matched to gaming icon -->
+    <path d="M4 26v14a9 14 0 0 0 1.9 8.6 4 7 0 0 0 2.1-6.1v-8a4 7 0 0 0-4-7z" fill="url(#glowL)" opacity=".6"/>
+    <path d="M60 26v14a9 14 0 0 1-1.9 8.6 4 7 0 0 1-2.1-6.1v-8a4 7 0 0 1 4-7z" fill="url(#glowR)" opacity=".6"/>
+
+    <!-- Toggle track: inset slot across the body -->
+    <rect x="14" y="26" width="36" height="16" rx="8" fill="#9d7cd8"/>
+    <rect x="15" y="27" width="34" height="14" rx="7" fill="url(#track)"/>
+
+    <!-- Knob in the "ON" (right) position -->
+    <circle cx="42" cy="34" r="7.5" fill="#9d7cd8"/>
+    <circle cx="42" cy="34" r="6.5" fill="url(#knob)"/>
+    <!-- Knob highlight -->
+    <ellipse cx="40" cy="31.5" rx="2.5" ry="1.6" fill="#d4bfff" opacity=".55"/>
+
+    <!-- Touch ripples emanating from knob -->
+    <circle cx="42" cy="34" r="10.5" fill="none" stroke="#d4bfff" stroke-width="1" opacity=".35"/>
+    <circle cx="42" cy="34" r="13"   fill="none" stroke="#bb9af7" stroke-width="1" opacity=".22"/>
+    <circle cx="42" cy="34" r="15.5" fill="none" stroke="#9d7cd8" stroke-width="1" opacity=".14"/>
+    <circle cx="42" cy="34" r="11"   fill="url(#touch)"/>
+
+  </g>
+</svg>
