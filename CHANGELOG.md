@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.3.0 — onboarding wizard + persistent autologin fix
+
+### Features
+
+- **First-launch onboarding wizard.** New users are walked through four
+  steps on first run: autologin repair, boot target selection, password
+  safety check, and desktop shortcut creation. Every step detects its
+  own state and skips itself if already correct. Guarded by
+  `~/.config/toglit/onboarding_done` so it only appears once.
+
+### Bug fixes
+
+- **Autologin toggle now survives SteamOS updates.** `/etc` on SteamOS is
+  a volatile overlayfs — edits via plain `pkexec sed` land in the upper
+  layer and are wiped by updates or a `steamos-readonly reset`. The
+  autologin enable/disable paths now bracket every write with
+  `pkexec steamos-readonly disable / enable`, landing the change in the
+  real lower-layer filesystem. polkit's `auth_admin_keep` means users
+  still see only one password prompt per operation.
+- **Handles "no `#User=deck` line to uncomment" gracefully.** On some
+  SteamOS images the commented placeholder is absent entirely. The new
+  `_autologin_write_persistent` helper falls back to inserting
+  `User=<user>` after `[Autologin]` if the uncomment pass found nothing.
+
+### Improvements
+
+- `_autologin_is_broken` detects the "User=steamos placeholder active"
+  state that causes autologin to silently fail after a clean install or
+  update, surfacing a fix prompt in the onboarding wizard.
+- Autologin logic extracted into reusable
+  `_autologin_write_persistent` / `_autologin_comment_persistent`
+  helpers; `toggle_autologin` is now a thin wrapper around them.
+
 ## v1.2.0 — security audit + CI
 
 ### Security

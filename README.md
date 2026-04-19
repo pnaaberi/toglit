@@ -258,6 +258,29 @@ set a password, expect a single prompt. The autologin toggle also uses
   a mode switch. Panel height and desktop-icon size are updated live via
   the plasmashell scripting interface instead.
 
+## First launch
+
+On first run TOGLIT shows a one-time setup wizard that works through
+everything it needs:
+
+1. **Autologin** — detects and repairs the common SteamOS quirk where
+   `/etc/sddm.conf.d/` ships with `User=deck` commented out, causing
+   autologin to silently fail (the system tries `User=steamos`, a
+   non-existent account). The fix is written to the real lower-layer
+   filesystem using `steamos-readonly disable/enable`, so it survives
+   SteamOS updates.
+2. **Boot target** — lets you confirm whether the Deck should default to
+   Gaming (Steam UI) or Desktop (KDE Plasma) on power-on.
+3. **Password check** — reminds you to set a password (`passwd` in Konsole)
+   if you don't have one. Required before you disable autologin, otherwise
+   the login screen would have no way to accept input.
+4. **Desktop shortcut** — offers to place the TOGLIT icon on your Desktop
+   so you can relaunch it without a terminal.
+
+After the wizard completes everything is confirmed ✓ in a summary screen.
+The wizard never runs again (it leaves `~/.config/toglit/onboarding_done`).
+Re-run it manually at any time by deleting that file.
+
 ## Troubleshooting
 
 - **Panel didn't resize** — the live plasmashell scripting call may have

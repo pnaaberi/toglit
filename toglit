@@ -11,7 +11,7 @@ set -euo pipefail
 # rely on for aligning the TUI around em-dashes, middle-dots, box drawing, etc.
 export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 # =============================================================================
 # ASCII splash
@@ -300,6 +300,80 @@ _sed_regex_escape() {
         esac
     done
     printf '%s' "$out"
+}
+
+# =============================================================================
+# Autologin persistence helpers
+#
+# SteamOS mounts /etc as a volatile overlayfs (lower = read-only image,
+# upper = tmpfs-like layer in /var/lib/overlays). Edits via pkexec sed land
+# in the upper layer and are wiped by SteamOS updates or a readonly reset.
+#
+# The shipped /usr/lib/sddm/sddm.conf.d/steamos.conf sets User=steamos —
+# a placeholder account that doesn't exist. The /etc drops are supposed to
+# override it with User=deck, but they ship with that line commented out.
+# Without the override active in the real filesystem (lower layer), autologin
+# fails with "User not known" after every update/reset.
+#
+# Fix: bracket every SDDM-user edit with steamos-readonly disable/enable so
+# the change lands in the lower layer and survives reboots and updates.
+# =============================================================================
+
+# Returns 0 if autologin is broken: currently off AND the SteamOS system-
+# level conf still carries its shipped User=steamos placeholder, meaning
+# SDDM will attempt (and fail) to autologin a non-existent account.
+# Returns 1 if autologin is on, or if it's off-by-intent (user disabled it
+# after it was working, so the placeholder was already overridden).
+_autologin_is_broken() {
+    [[ "$(get_autologin_state)" == "off" ]] || return 1
+    grep -qE '^\s*User\s*=\s*steamos\s*$' \
+        /usr/lib/sddm/sddm.conf.d/steamos.conf 2>/dev/null
+}
+
+# Write User=<user> persistently into the lower-layer SDDM system confs
+# using steamos-readonly disable/enable so the change survives updates.
+# Strategy: try to uncomment an existing #User=<user> line first; if none
+# found, inject User=<user> directly after the [Autologin] section header.
+# Requires two or three pkexec prompts; with auth_admin_keep these all
+# reuse the same password entry made for the first prompt.
+_autologin_write_persistent() {
+    local user="$1" user_re
+    user_re="$(_sed_regex_escape "$user")"
+
+    if ! pkexec /usr/bin/steamos-readonly disable 2>/dev/null; then
+        return 1
+    fi
+
+    # Pass 1: uncomment #User=<user> where present
+    pkexec /usr/bin/sed -i -E \
+        "s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)$/\\1/" \
+        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null || true
+
+    # Pass 2: if still no active User=<user> line, inject after [Autologin]
+    if [[ "$(get_autologin_state)" == "off" ]]; then
+        pkexec /usr/bin/sed -i \
+            "/^\[Autologin\]/a User=${user}" \
+            "${SDDM_SYSTEM_CONFS[0]}" 2>/dev/null || true
+    fi
+
+    pkexec /usr/bin/steamos-readonly enable 2>/dev/null || true
+}
+
+# Remove User=<user> from SDDM system confs persistently (disable path).
+# Comments the line rather than deleting — easy to reverse.
+_autologin_comment_persistent() {
+    local user="$1" user_re
+    user_re="$(_sed_regex_escape "$user")"
+
+    if ! pkexec /usr/bin/steamos-readonly disable 2>/dev/null; then
+        return 1
+    fi
+
+    pkexec /usr/bin/sed -i -E \
+        "s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)$/#\\1/" \
+        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null || true
+
+    pkexec /usr/bin/steamos-readonly enable 2>/dev/null || true
 }
 
 # =============================================================================
@@ -959,23 +1033,23 @@ toggle_autologin() {
         return 0
     fi
 
-    local sed_expr
+    # Use the persistent helpers so the change lands in the real lower-layer
+    # filesystem (steamos-readonly disable/enable) instead of the volatile
+    # overlay that gets wiped by SteamOS updates.
     if [[ "$new" == "off" ]]; then
-        # Comment only OUR User= line — leave any other user's autologin
-        # config alone on multi-user systems.
-        sed_expr="s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)\$/#\\1/"
+        if ! _autologin_comment_persistent "$user"; then
+            whiptail --title " Error " --msgbox \
+                "\n  Failed to update the login settings.\n  (Was the password prompt cancelled?)" \
+                9 50
+            return 1
+        fi
     else
-        # Uncomment a commented #User= line we (or SDDM defaults) previously
-        # wrote. If no such line exists, the edit is a no-op and the
-        # mismatch dialog below fires.
-        sed_expr="s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)\$/\\1/"
-    fi
-
-    if ! pkexec /usr/bin/sed -i -E "$sed_expr" "${SDDM_SYSTEM_CONFS[@]}"; then
-        whiptail --title " Error " --msgbox \
-            "\n  Failed to update the login settings.\n  (Was the password prompt cancelled, or\n  did the system refuse the action?)" \
-            11 50
-        return 1
+        if ! _autologin_write_persistent "$user"; then
+            whiptail --title " Error " --msgbox \
+                "\n  Failed to update the login settings.\n  (Was the password prompt cancelled?)" \
+                9 50
+            return 1
+        fi
     fi
 
     local actual human
@@ -1345,6 +1419,177 @@ tui_menu() {
 # Main menu
 # =============================================================================
 
+# =============================================================================
+# First-launch onboarding wizard
+#
+# Runs exactly once (guarded by ~/.config/toglit/onboarding_done).
+# Works through every prerequisite in order — autologin, boot target,
+# password safety, desktop shortcut — so the Deck is fully set up before
+# the user ever sees the main menu. Each step detects its own state and
+# skips itself if already correct.
+# =============================================================================
+
+ONBOARDING_DONE_FILE="$STATE_DIR/onboarding_done"
+
+_onboarding_needed() {
+    [[ ! -f "$ONBOARDING_DONE_FILE" ]]
+}
+
+_onboarding_mark_done() {
+    touch "$ONBOARDING_DONE_FILE" 2>/dev/null || true
+}
+
+# ── Step helpers ─────────────────────────────────────────────────────────────
+
+_ob_autologin() {
+    # Detect and repair the broken-autologin state produced by SteamOS's
+    # volatile overlay wiping User=deck from /etc/sddm.conf.d/.
+    local al
+    al="$(get_autologin_state)"
+
+    if [[ "$al" == "on" ]]; then
+        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+            "\n  ✓  Autologin is already working.\n\n  Your Deck will boot straight into Gaming\n  or Desktop Mode without a login screen." \
+            11 54
+        return 0
+    fi
+
+    # Autologin is off — explain why and offer to fix it.
+    local fix_label
+    if _autologin_is_broken; then
+        fix_label="\n  TOGLIT found a known SteamOS issue:\n  the autologin user is misconfigured, so\n  the Deck shows a failed login attempt\n  then a greeter on every boot.\n\n  This is an easy one-click fix."
+    else
+        fix_label="\n  Autologin is currently OFF — every boot\n  shows a login screen. Most users want it\n  ON so the Deck boots straight to Gaming\n  or Desktop with no password prompt."
+    fi
+
+    whiptail --title " Step 1 of 4 · Autologin " --yesno \
+        "${fix_label}\n\n  Turn autologin ON now? (recommended)" \
+        17 58 --yes-button "Fix it" --no-button "Leave off" || return 0
+
+    local user
+    user="$(_safe_login_user)" || {
+        whiptail --title " Error " --msgbox \
+            "\n  Could not resolve your login name.\n  Skipping autologin repair.\n\n  You can retry from Boot Settings →\n  Enable autologin." \
+            13 50
+        return 0
+    }
+
+    whiptail --title " Step 1 of 4 · Autologin " --infobox \
+        "\n  Fixing autologin — you may see a\n  password prompt. Please approve it." \
+        7 48
+
+    _autologin_write_persistent "$user"
+
+    if [[ "$(get_autologin_state)" == "on" ]]; then
+        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+            "\n  ✓  Autologin fixed and saved.\n\n  The Deck will now boot straight into\n  your chosen mode without a login screen.\n  This survives SteamOS updates." \
+            12 54
+    else
+        whiptail --title " Step 1 of 4 · Autologin " --msgbox \
+            "\n  The fix didn't fully apply — possibly\n  because the password prompt was cancelled.\n\n  You can retry later from:\n  Boot Settings → Enable autologin." \
+            13 54
+    fi
+}
+
+_ob_boot_target() {
+    local current
+    current="$(get_boot_target)"
+
+    local current_label
+    case "$current" in
+        gaming)  current_label="Gaming (Steam UI) — this is the default" ;;
+        desktop) current_label="Desktop (KDE Plasma)" ;;
+        *)       current_label="$current" ;;
+    esac
+
+    local choice
+    choice="$(whiptail --title " Step 2 of 4 · Boot Target " \
+        --menu \
+        "\n  Which mode should the Deck open on\n  every power-on?\n\n  Current: $current_label\n" \
+        18 60 3 \
+        "gaming"  "Gaming Mode  (Steam UI — factory default)" \
+        "desktop" "Desktop Mode (KDE Plasma)" \
+        "keep"    "Keep current setting ($current)" \
+        3>&1 1>&2 2>&3)" || return 0
+
+    [[ "$choice" == "keep" || "$choice" == "$current" ]] && return 0
+
+    set_boot_target "$choice" 2>/dev/null && \
+        whiptail --title " Step 2 of 4 · Boot Target " --msgbox \
+            "\n  ✓  Default boot target set to: ${choice^}.\n\n  Takes effect on next reboot." \
+            10 50
+}
+
+_ob_password() {
+    local status
+    status="$(_password_status)"
+
+    if [[ "$status" == "set" ]]; then
+        whiptail --title " Step 3 of 4 · Password " --msgbox \
+            "\n  ✓  Your account has a password set.\n\n  This is required for the pkexec prompts\n  TOGLIT uses, and keeps the login screen\n  useful if you ever turn autologin off." \
+            13 54
+        return 0
+    fi
+
+    # No password — explain the risk and show the command.
+    whiptail --title " Step 3 of 4 · Password " --msgbox \
+        "\n  Your account has NO password.\n\n  That's fine right now, but if you ever\n  turn autologin off the login screen will\n  appear with no way to type a password —\n  locking you out.\n\n  To set one, open Konsole and run:\n\n      passwd\n\n  You can do this now or any time before\n  you disable autologin." \
+        19 56
+}
+
+_ob_shortcut() {
+    if whiptail --title " Step 4 of 4 · Desktop Shortcut " --yesno \
+        "\n  Create a TOGLIT icon on your Desktop\n  so you can relaunch it without opening\n  a terminal?\n\n  (Recommended — you can always delete it\n  later from the Desktop.)" \
+        14 54 --yes-button "Create shortcut" --no-button "Skip"; then
+        install_shortcut && \
+            whiptail --title " Step 4 of 4 · Desktop Shortcut " --msgbox \
+                "\n  ✓  TOGLIT icon placed on your Desktop\n  and registered in the app menu.\n\n  Double-click it any time to reopen TOGLIT." \
+                12 54
+    fi
+}
+
+_ob_summary() {
+    local al boot pw shortcut_status
+    al="$(get_autologin_state)"
+    boot="$(get_boot_target)"
+    pw="$(_password_status)"
+    [[ -f "$HOME/Desktop/toglit.desktop" ]] && shortcut_status="created" || shortcut_status="skipped"
+
+    local al_line boot_line pw_line sc_line
+    [[ "$al"   == "on"  ]] && al_line="  ✓  Autologin ........... ON"   || al_line="  ✗  Autologin ........... OFF (login screen on boot)"
+    boot_line="  ✓  Default boot ........ ${boot^}"
+    [[ "$pw"   == "set" ]] && pw_line="  ✓  Account password .... set" || pw_line="  ⚠  Account password .... not set (set with: passwd)"
+    [[ "$shortcut_status" == "created" ]] && sc_line="  ✓  Desktop shortcut .... created" || sc_line="  –  Desktop shortcut .... skipped"
+
+    whiptail --title " Setup complete " --msgbox \
+        "\n  All done! Here's your current state:\n\n${al_line}\n${boot_line}\n${pw_line}\n${sc_line}\n\n  TOGLIT is now in your app menu.\n  Main features:\n    · Touch Mode  — finger-friendly Plasma\n    · Boot Settings — switch Gaming/Desktop\n    · Restore Backup — undo all TOGLIT changes" \
+        23 62
+}
+
+# ── Main wizard ───────────────────────────────────────────────────────────────
+
+run_onboarding() {
+    whiptail --title " Welcome to TOGLIT  v$VERSION " --yesno \
+        "\n  TOGLIT is your Steam Deck's mode switcher:\n\n  · Flip between finger-friendly Touch Mode\n    and standard KDE Desktop Mode.\n  · Set which session (Gaming or Desktop)\n    the Deck boots into by default.\n  · Fix the SteamOS autologin quirks that\n    prevent Gaming Mode from launching.\n\n  This one-time setup takes about 1 minute\n  and makes sure everything works correctly.\n\n  Run setup now?" \
+        20 60 --yes-button "Let's go" --no-button "Skip" || {
+        _onboarding_mark_done
+        return 0
+    }
+
+    clear
+    _ob_autologin
+    clear
+    _ob_boot_target
+    clear
+    _ob_password
+    clear
+    _ob_shortcut
+    clear
+    _ob_summary
+
+    _onboarding_mark_done
+}
+
 main_menu() {
     while true; do
         local current_mode boot_target mode_chip
@@ -1459,5 +1704,12 @@ fi
 # qt6-virtualkeyboard env drop-ins from this or prior versions on every
 # launch so the Qt variant stays off for good.
 force_disable_vkbd
+
+# First-launch onboarding: walks through autologin repair, boot target,
+# password check, and desktop shortcut. Runs once, skipped on return visits.
+if _onboarding_needed; then
+    run_onboarding
+    clear
+fi
 
 main_menu
