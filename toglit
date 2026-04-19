@@ -746,7 +746,7 @@ get_boot_target() {
         gamescope-wayland.desktop)           echo "gaming" ;;
         plasma.desktop|plasmax11.desktop)    echo "desktop" ;;
         plasma-steamos-oneshot.desktop|\
-        plasma-steamos-wayland-oneshot.desktop) echo "gaming*" ;;
+        plasma-steamos-wayland-oneshot.desktop) echo "desktop-once" ;;
         "") echo "unset" ;;
         *) echo "custom" ;;
     esac
@@ -1085,7 +1085,7 @@ boot_menu() {
             " default: $current   ·   autologin: $al " \
             "@header:reboot now" "" \
             "1  Reboot to Desktop · just this once" \
-            "Reboots right now and opens Plasma Desktop. The boot after that auto-returns to whatever your default is. Your default boot target is not changed — this is a one-time trip." \
+            "Reboots right now into Desktop. After that boot the status shows 'desktop-once' — that's normal, it just means the one-shot trip is queued. The boot after that auto-returns to your default. Your default is not changed." \
             "2  Reboot to Gaming · just this once" \
             "Reboots right now and opens Steam's Gaming UI. Also sets Gaming as your default if it wasn't already — acts as a quick 'back to normal' button." \
             "@header:set persistent default" "" \
@@ -1509,9 +1509,10 @@ _ob_boot_target() {
 
     local current_label
     case "$current" in
-        gaming)  current_label="Gaming (Steam UI) — this is the default" ;;
-        desktop) current_label="Desktop (KDE Plasma)" ;;
-        *)       current_label="$current" ;;
+        gaming)        current_label="Gaming (Steam UI)" ;;
+        desktop)       current_label="Desktop (KDE Plasma)" ;;
+        desktop-once)  current_label="Desktop next boot only, then back to Gaming" ;;
+        *)             current_label="$current" ;;
     esac
 
     local choice
