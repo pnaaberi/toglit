@@ -1454,17 +1454,25 @@ _ob_autologin() {
         return 0
     fi
 
-    # Autologin is off — explain why and offer to fix it.
-    local fix_label
     if _autologin_is_broken; then
-        fix_label="\n  TOGLIT found a known SteamOS issue:\n  the autologin user is misconfigured, so\n  the Deck shows a failed login attempt\n  then a greeter on every boot.\n\n  This is an easy one-click fix."
+        # The autologin mechanism itself is broken — SDDM has a non-existent
+        # placeholder user so it always fails and falls back to the greeter,
+        # regardless of whether the user wants a login screen or not. Offer
+        # to repair the mechanism; leave the on/off choice to the user.
+        if ! whiptail --title " Step 1 of 4 · Autologin " --yesno \
+            "\n  TOGLIT found a SteamOS misconfiguration:\n  the autologin user is set to a placeholder\n  account that doesn't exist. This means the\n  Deck always fails autologin silently, then\n  shows the greeter — even if you'd prefer\n  a direct boot.\n\n  Repair it now? This fixes the mechanism\n  but doesn't force autologin on — you can\n  turn it on or off in Boot Settings after." \
+            18 60 --yes-button "Repair" --no-button "Skip"; then
+            return 0
+        fi
     else
-        fix_label="\n  Autologin is currently OFF — every boot\n  shows a login screen. Most users want it\n  ON so the Deck boots straight to Gaming\n  or Desktop with no password prompt."
+        # Autologin is off but not broken — user or a previous tool disabled
+        # it intentionally. Just ask, no pressure either way.
+        if ! whiptail --title " Step 1 of 4 · Autologin " --yesno \
+            "\n  Autologin is currently OFF.\n\n  OFF — every boot shows a login screen.\n        You pick the session and type your\n        password each time.\n\n  ON  — the Deck boots straight into your\n        chosen mode with no password prompt.\n        (This is the factory default.)\n\n  Turn autologin ON?" \
+            18 58 --yes-button "Turn ON" --no-button "Leave OFF"; then
+            return 0
+        fi
     fi
-
-    whiptail --title " Step 1 of 4 · Autologin " --yesno \
-        "${fix_label}\n\n  Turn autologin ON now? (recommended)" \
-        17 58 --yes-button "Fix it" --no-button "Leave off" || return 0
 
     local user
     user="$(_safe_login_user)" || {
