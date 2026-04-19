@@ -1534,15 +1534,15 @@ _ob_password() {
 
     if [[ "$status" == "set" ]]; then
         whiptail --title " Step 3 of 4 · Password " --msgbox \
-            "\n  ✓  Your account has a password set.\n\n  This is required for the pkexec prompts\n  TOGLIT uses, and keeps the login screen\n  useful if you ever turn autologin off." \
-            13 54
+            "\n  ✓  Your account has a password set.\n\n  If you ever turn autologin off, you'll\n  be able to log in at the login screen." \
+            11 54
         return 0
     fi
 
-    # No password — explain the risk and show the command.
+    # No password — explain the specific risk (login screen lockout only).
     whiptail --title " Step 3 of 4 · Password " --msgbox \
-        "\n  Your account has NO password.\n\n  That's fine right now, but if you ever\n  turn autologin off the login screen will\n  appear with no way to type a password —\n  locking you out.\n\n  To set one, open Konsole and run:\n\n      passwd\n\n  You can do this now or any time before\n  you disable autologin." \
-        19 56
+        "\n  Your account has NO password.\n\n  This only matters if you ever disable\n  autologin — the login screen would appear\n  but there'd be no password to type, and\n  you'd be locked out.\n\n  Everything else in TOGLIT works fine\n  without a password.\n\n  To set one before disabling autologin:\n  open Konsole and run:  passwd" \
+        18 56
 }
 
 _ob_shortcut() {
