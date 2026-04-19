@@ -1,0 +1,5 @@
+# TOGLIT shellcheck configuration.
+# CI runs shellcheck at severity=warning; this file only opts into
+# external-source following so multi-file scripts resolve correctly.
+
+external-sources=true
