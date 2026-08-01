@@ -89,15 +89,17 @@ into a TUI, with a safety net so you can undo everything.
 
 ## Install
 
-One line. Paste into Konsole on your Deck:
+Clone the repository, review the installer, and run it from the checkout:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh | bash
+git clone https://github.com/pnaaberi/toglit.git
+cd toglit
+./install.sh
 ```
 
-That clones the repo to `~/Projects/toglit/` (or updates it if already there)
-and runs `install.sh`. If you have a legacy clone at `~/toglit/` from an older
-install, bootstrap moves it to the new location. Nothing leaves `$HOME`. No sudo.
+The installer stays inside `$HOME` and does not require sudo. If you use the
+bootstrap helper, download and inspect it first rather than piping remote code
+directly into a shell.
 
 ### Reproducible install
 
@@ -106,7 +108,9 @@ landing on your Deck:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh \
-  | TOGLIT_REF=v1.2.0 bash
+  -o /tmp/toglit-bootstrap.sh
+less /tmp/toglit-bootstrap.sh
+TOGLIT_REF=v1.2.0 bash /tmp/toglit-bootstrap.sh
 ```
 
 Bootstrap prints the resolved 12-char commit SHA before running

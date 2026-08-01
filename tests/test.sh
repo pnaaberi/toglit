@@ -90,6 +90,27 @@ else
 fi
 
 echo
+echo "  privileged autologin failure handling"
+autologin_tmp="$(mktemp -d)"
+trap 'rm -rf "$STUBDIR" "$autologin_tmp"' EXIT
+printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/one.conf"
+printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/two.conf"
+SDDM_SYSTEM_CONFS=("$autologin_tmp/one.conf" "$autologin_tmp/two.conf")
+pkexec() {
+    if [[ "${1:-}" == "/usr/bin/sed" ]]; then
+        return 1
+    fi
+    return 0
+}
+set +e
+_autologin_comment_persistent deck
+assert_rc 1 $? 'reports failed privileged edit'
+_autologin_write_persistent deck
+assert_rc 1 $? 'reports failed privileged write'
+set -e
+unset -f pkexec
+
+echo
 echo "  _plasma_set_panel_height (input clamp)"
 set +e
 _plasma_set_panel_height 64;         assert_rc 0 $? 'accepts 64'
