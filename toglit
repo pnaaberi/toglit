@@ -1427,6 +1427,25 @@ tui_menu() {
     done
 }
 
+# The fixed-width menu and reserved help area need a real terminal viewport.
+# Refuse to draw when it would be clipped instead of producing a broken or
+# misleading layout. These values cover the tallest built-in menu plus the
+# keyboard hints below it.
+check_terminal_size() {
+    local cols="${1:-$(tput cols 2>/dev/null || echo 0)}"
+    local lines="${2:-$(tput lines 2>/dev/null || echo 0)}"
+    local min_cols=62
+    local min_lines=28
+
+    if [[ ! "$cols" =~ ^[0-9]+$ || ! "$lines" =~ ^[0-9]+$ ||
+          "$cols" -lt "$min_cols" || "$lines" -lt "$min_lines" ]]; then
+        printf 'toglit: terminal is too small (%sx%s); resize to at least %sx%s.\n' \
+            "$cols" "$lines" "$min_cols" "$min_lines" >&2
+        return 1
+    fi
+    return 0
+}
+
 # =============================================================================
 # Main menu
 # =============================================================================
@@ -1701,6 +1720,7 @@ fi
 trap cleanup EXIT
 
 check_deps
+check_terminal_size
 migrate_state
 
 print_splash animate

@@ -111,6 +111,21 @@ set -e
 unset -f pkexec
 
 echo
+echo "  check_terminal_size"
+check_terminal_size 62 28
+assert_rc 0 $? 'accepts minimum terminal size'
+check_terminal_size 80 40
+assert_rc 0 $? 'accepts a standard terminal size'
+set +e
+check_terminal_size 61 28 2>/dev/null
+assert_rc 1 $? 'rejects insufficient width'
+check_terminal_size 62 27 2>/dev/null
+assert_rc 1 $? 'rejects insufficient height'
+check_terminal_size bad 40 2>/dev/null
+assert_rc 1 $? 'rejects invalid dimensions'
+set -e
+
+echo
 echo "  _plasma_set_panel_height (input clamp)"
 set +e
 _plasma_set_panel_height 64;         assert_rc 0 $? 'accepts 64'

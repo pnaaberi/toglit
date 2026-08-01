@@ -142,6 +142,10 @@ Reboot is **not** required.
 
 ## Use
 
+TOGLIT requires a terminal at least **62 columns wide and 28 rows high**.
+If the terminal is smaller, it exits with the required dimensions instead of
+drawing a clipped interface. Resize the Konsole window and launch it again.
+
 Double-click **TOGLIT** on the desktop, or run `toglit` in a terminal.
 
 ```
