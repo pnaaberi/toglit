@@ -53,11 +53,12 @@ TOGLIT_REF=v1.2.0 bash /tmp/toglit-bootstrap.sh
 toglit
 ```
 
-The main menu provides Touch Mode, Desktop Mode, Current Status, Restore
-Backup, Create Desktop Shortcut, and Exit.
+The main menu provides Touch Mode, Restore Desktop Settings, Current Status,
+Repair Desktop Shortcut, and Exit.
 
-The backup is created before TOGLIT changes KDE settings. Restore Backup puts
-the saved files back and removes TOGLIT's virtual-keyboard environment drop-in.
+The backup is created before TOGLIT changes KDE settings. Restore Desktop
+Settings puts the saved files back and removes TOGLIT's virtual-keyboard
+environment drop-in.
 
 ## Safety
 

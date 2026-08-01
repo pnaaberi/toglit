@@ -521,8 +521,8 @@ restore_backup() {
     fi
     _notify_kde_live
     echo "desktop" > "$STATE_FILE"
-    whiptail --title " Restored " --msgbox \
-        "\n  Your original settings are back.\n  (Snapshot from your first Touch Mode toggle.)\n\n  Panel height + GTK apps update on next login." \
+        whiptail --title " Desktop Settings Restored " --msgbox \
+        "\n  Your original desktop settings are back.\n\n  Some GTK and Plasma changes may fully\n  apply after restarting apps or logging in again." \
         11 54
 }
 
@@ -708,8 +708,8 @@ toggle_touch() {
 
     echo "touch" > "$STATE_FILE"
 
-    whiptail --title " Touch Mode Active " --msgbox \
-        "\n  Fonts ............. 14pt\n  Cursor ............ preserved\n  Panel ............. 64px\n  Icons ............. enlarged\n  Window buttons .... very large\n  Scrollbars ........ 20px\n  Single-click ...... on\n\n  GTK apps need restart for changes." \
+        whiptail --title " Touch Mode On " --msgbox \
+        "\n  Touch Mode is on.\n\n  Fonts, icons, panel, scrollbars, and\n  window controls are larger.\n\n  GTK apps may need to be restarted.\n  Some changes may fully apply after login." \
         16 50
 }
 
@@ -739,8 +739,8 @@ toggle_desktop() {
 
     echo "desktop" > "$STATE_FILE"
 
-    whiptail --title " Desktop Mode Active " --msgbox \
-        "\n  Your settings are back to how they were\n  before your first Touch Mode toggle.\n\n  Panel + GTK apps update fully on next login." \
+        whiptail --title " Desktop Settings Restored " --msgbox \
+        "\n  Your original desktop settings are back.\n\n  Some GTK and Plasma changes may fully\n  apply after restarting apps or logging in again." \
         11 52
 }
 
@@ -1129,13 +1129,19 @@ boot_menu() {
 # =============================================================================
 
 show_settings() {
-    local mode backup_status
+    local mode mode_label backup_status backup_label
     mode="$(detect_mode)"
     backup_status="none"
     [[ -d "$BACKUP_DIR" ]] && backup_status="exists"
 
-    whiptail --title " TOGLIT Status " --msgbox \
-        "\n  Session mode ....... $mode\n  Backup ............. $backup_status" \
+    case "$mode" in
+        touch) mode_label="Touch Mode" ;;
+        desktop) mode_label="Desktop Settings" ;;
+        *) mode_label="$mode" ;;
+    esac
+    [[ "$backup_status" == "exists" ]] && backup_label="Available" || backup_label="Not created"
+    whiptail --title " Current Status " --msgbox \
+        "\n  Current mode ....... $mode_label\n  Original settings .. $backup_label" \
         8 50
 }
 
@@ -1642,17 +1648,15 @@ main_menu() {
             "@header:session" "" \
             "1  Touch Mode" \
             "Makes everything finger-sized: bigger fonts, larger icons, wider scrollbars, and chunky window buttons. Good for handheld or tablet use. Use Steam's on-screen keyboard (Steam+X) when you need to type." \
-            "2  Desktop Mode" \
-            "Rolls back to your original KDE settings. The snapshot was taken the first time you launched TOGLIT — no opinions imposed, just your setup." \
+            "2  Restore Desktop Settings" \
+            "Restores the KDE settings saved before your first Touch Mode change." \
             "@header:system" "" \
             "3  Current Status" \
             "Quick read-only view of what TOGLIT owns: session mode and whether a backup exists." \
-            "4  Restore Backup" \
-            "Same effect as Desktop Mode: rolls back to the first-launch snapshot. Kept as a separate entry in case Desktop Mode ever feels broken." \
-            "5  Create Desktop Shortcut" \
-            "Places (or re-places) the TOGLIT icon on your Desktop and in the application menu. Run it the first time to get the icon, or any time later if you accidentally delete it." \
+            "4  Repair Desktop Shortcut" \
+            "Creates or replaces the TOGLIT shortcut on your Desktop and in the application menu." \
             "@header:app" "" \
-            "6  Exit" \
+            "5  Exit" \
             "Close TOGLIT. Nothing changes on exit. Relaunch from the Desktop icon or by typing 'toglit' in a terminal." \
             || return 0
 
@@ -1667,20 +1671,10 @@ main_menu() {
                     toggle_touch
                 fi
                 ;;
-            2)
-                if [[ "$current_mode" == "desktop" ]]; then
-                    if whiptail --title " Already Active " --yesno \
-                        "\n  Desktop Mode is already active.\n  Re-apply settings anyway?" 9 44; then
-                        toggle_desktop
-                    fi
-                else
-                    toggle_desktop
-                fi
-                ;;
+            2) toggle_desktop ;;
             3) show_settings ;;
-            4) restore_backup ;;
-            5) repair_shortcut ;;
-            6) return 0 ;;
+            4) repair_shortcut ;;
+            5) return 0 ;;
         esac
     done
 }
