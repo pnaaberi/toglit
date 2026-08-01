@@ -1216,9 +1216,15 @@ tui_menu() {
     done
 
     local n=${#labels[@]}
-    local width=62
+    local cols="$(tput cols 2>/dev/null || echo 62)"
+    local lines="$(tput lines 2>/dev/null || echo 28)"
+    local width=$((cols - 2))
+    (( width > 62 )) && width=62
+    (( width < 40 )) && width=40
     local inner=$((width - 4))     # text cell inside "│  ...  │"
     local help_h=3                 # reserved help lines — fixed, no layout shift
+    (( lines < 24 )) && help_h=2
+    (( lines < 22 )) && help_h=1
 
     # Build a map of selectable indices (skips @header: rows).
     local items=()
@@ -1257,14 +1263,26 @@ tui_menu() {
         fi
     }
 
+    _fit() {
+        local s="$1" w="$2"
+        local len=${#s}
+        if (( len <= w )); then
+            printf '%s' "$s"
+        elif (( w <= 1 )); then
+            printf '%s' "${s:0:w}"
+        else
+            printf '%s…' "${s:0:$((w - 1))}"
+        fi
+    }
+
     _tui_draw() {
         tput cup 0 0
         printf '%s┌%s┐%s\n' "$C_BOX" "$bar" "$C_RST"
         printf '%s│%s %s %s│%s\n' \
-            "$C_BOX" "$C_TITLE" "$(_pad "$title" "$inner")" "$C_RST$C_BOX" "$C_RST"
+            "$C_BOX" "$C_TITLE" "$(_pad "$(_fit "$title" "$inner")" "$inner")" "$C_RST$C_BOX" "$C_RST"
         if [[ -n "$subtitle" ]]; then
             printf '%s│%s %s %s│%s\n' \
-                "$C_BOX" "$C_SUB" "$(_pad "$subtitle" "$inner")" "$C_RST$C_BOX" "$C_RST"
+                "$C_BOX" "$C_SUB" "$(_pad "$(_fit "$subtitle" "$inner")" "$inner")" "$C_RST$C_BOX" "$C_RST"
         else
             printf '%s│%s│%s\n' "$C_BOX" "$(_pad "" "$((width - 2))")" "$C_RST"
         fi
@@ -1312,7 +1330,7 @@ tui_menu() {
             fi
             printf '%s│%s %s%s %s│%s\n' \
                 "$C_BOX" "$color" "$prefix" \
-                "$(_pad "${labels[i]}" "$((inner - 2))")" \
+                "$(_pad "$(_fit "${labels[i]}" "$((inner - 2))")" "$((inner - 2))")" \
                 "$C_RST$C_BOX" "$C_RST"
             rendered_any=1
         done
@@ -1331,14 +1349,18 @@ tui_menu() {
         done
 
         printf '%s└%s┘%s\n' "$C_BOX" "$bar" "$C_RST"
-        printf '\n'
-        printf '  %sSteam Deck:  D-pad ↑↓ (move)  ·  A (select)  ·  B (back)%s\n' \
-            "$C_HINT" "$C_RST"
-        printf '\n'
-        printf '  %sKeyboard:    ↑↓ (move)  ·  Enter / Space (select)  ·%s\n' \
-            "$C_HINT" "$C_RST"
-        printf '               %sEsc / Backspace (back)%s' \
-            "$C_HINT" "$C_RST"
+        if (( lines >= 24 )); then
+            printf '\n'
+            printf '  %sSteam Deck:  D-pad ↑↓ (move)  ·  A (select)  ·  B (back)%s\n' \
+                "$C_HINT" "$C_RST"
+            printf '\n'
+            printf '  %sKeyboard:    ↑↓ (move)  ·  Enter / Space (select)  ·%s\n' \
+                "$C_HINT" "$C_RST"
+            printf '               %sEsc / Backspace (back)%s' \
+                "$C_HINT" "$C_RST"
+        else
+            printf '\n  %s↑↓ move · Enter select · Esc back%s' "$C_HINT" "$C_RST"
+        fi
         tput ed  # erase to end of screen — wipes leftovers from larger prior menus
     }
 
@@ -1425,15 +1447,13 @@ tui_menu() {
     done
 }
 
-# The fixed-width menu and reserved help area need a real terminal viewport.
-# Refuse to draw when it would be clipped instead of producing a broken or
-# misleading layout. These values cover the tallest built-in menu plus the
-# keyboard hints below it.
+# The menu adapts to the terminal width and reduces help/instruction space on
+# shorter terminals. Refuse only sizes that cannot render a usable menu.
 check_terminal_size() {
     local cols="${1:-$(tput cols 2>/dev/null || echo 0)}"
     local lines="${2:-$(tput lines 2>/dev/null || echo 0)}"
-    local min_cols=62
-    local min_lines=28
+    local min_cols=40
+    local min_lines=20
 
     if [[ ! "$cols" =~ ^[0-9]+$ || ! "$lines" =~ ^[0-9]+$ ||
           "$cols" -lt "$min_cols" || "$lines" -lt "$min_lines" ]]; then
