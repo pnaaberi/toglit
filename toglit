@@ -337,7 +337,7 @@ _autologin_is_broken() {
 # Requires two or three pkexec prompts; with auth_admin_keep these all
 # reuse the same password entry made for the first prompt.
 _autologin_write_persistent() {
-    local user="$1" user_re
+    local user="$1" user_re rc=0
     user_re="$(_sed_regex_escape "$user")"
 
     if ! pkexec /usr/bin/steamos-readonly disable 2>/dev/null; then
@@ -345,35 +345,47 @@ _autologin_write_persistent() {
     fi
 
     # Pass 1: uncomment #User=<user> where present
-    pkexec /usr/bin/sed -i -E \
+    if ! pkexec /usr/bin/sed -i -E \
         "s/^#([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)$/\\1/" \
-        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null || true
-
-    # Pass 2: if still no active User=<user> line, inject after [Autologin]
-    if [[ "$(get_autologin_state)" == "off" ]]; then
-        pkexec /usr/bin/sed -i \
-            "/^\[Autologin\]/a User=${user}" \
-            "${SDDM_SYSTEM_CONFS[0]}" 2>/dev/null || true
+        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null; then
+        rc=1
     fi
 
-    pkexec /usr/bin/steamos-readonly enable 2>/dev/null || true
+    # Pass 2: if still no active User=<user> line, inject after [Autologin]
+    if (( rc == 0 )) && [[ "$(get_autologin_state)" == "off" ]]; then
+        if ! pkexec /usr/bin/sed -i \
+            "/^\[Autologin\]/a User=${user}" \
+            "${SDDM_SYSTEM_CONFS[0]}" 2>/dev/null; then
+            rc=1
+        fi
+    fi
+
+    if ! pkexec /usr/bin/steamos-readonly enable 2>/dev/null; then
+        rc=1
+    fi
+    return "$rc"
 }
 
 # Remove User=<user> from SDDM system confs persistently (disable path).
 # Comments the line rather than deleting — easy to reverse.
 _autologin_comment_persistent() {
-    local user="$1" user_re
+    local user="$1" user_re rc=0
     user_re="$(_sed_regex_escape "$user")"
 
     if ! pkexec /usr/bin/steamos-readonly disable 2>/dev/null; then
         return 1
     fi
 
-    pkexec /usr/bin/sed -i -E \
+    if ! pkexec /usr/bin/sed -i -E \
         "s/^([[:space:]]*User[[:space:]]*=[[:space:]]*${user_re}[[:space:]]*)$/#\\1/" \
-        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null || true
+        "${SDDM_SYSTEM_CONFS[@]}" 2>/dev/null; then
+        rc=1
+    fi
 
-    pkexec /usr/bin/steamos-readonly enable 2>/dev/null || true
+    if ! pkexec /usr/bin/steamos-readonly enable 2>/dev/null; then
+        rc=1
+    fi
+    return "$rc"
 }
 
 # =============================================================================
@@ -1415,6 +1427,25 @@ tui_menu() {
     done
 }
 
+# The fixed-width menu and reserved help area need a real terminal viewport.
+# Refuse to draw when it would be clipped instead of producing a broken or
+# misleading layout. These values cover the tallest built-in menu plus the
+# keyboard hints below it.
+check_terminal_size() {
+    local cols="${1:-$(tput cols 2>/dev/null || echo 0)}"
+    local lines="${2:-$(tput lines 2>/dev/null || echo 0)}"
+    local min_cols=62
+    local min_lines=28
+
+    if [[ ! "$cols" =~ ^[0-9]+$ || ! "$lines" =~ ^[0-9]+$ ||
+          "$cols" -lt "$min_cols" || "$lines" -lt "$min_lines" ]]; then
+        printf 'toglit: terminal is too small (%sx%s); resize to at least %sx%s.\n' \
+            "$cols" "$lines" "$min_cols" "$min_lines" >&2
+        return 1
+    fi
+    return 0
+}
+
 # =============================================================================
 # Main menu
 # =============================================================================
@@ -1689,6 +1720,7 @@ fi
 trap cleanup EXIT
 
 check_deps
+check_terminal_size
 migrate_state
 
 print_splash animate
