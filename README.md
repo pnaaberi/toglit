@@ -22,9 +22,10 @@ those settings, so they are outside this tool's scope.
 - KDE Plasma 6 and the stock SteamOS utilities
 - `whiptail`, KDE config tools, D-Bus, and `qdbus6`
 
-TOGLIT requires a terminal at least **62 columns wide and 28 rows high**. If
-the terminal is smaller, it exits with a clear resize message instead of
-drawing a clipped interface.
+TOGLIT adapts to terminal size. It uses up to 62 columns, truncates long menu
+labels safely, and reduces help/instruction space in compact windows. The
+minimum usable size is **40 columns wide and 20 rows high**. Smaller terminals
+show a clear resize message instead of drawing a clipped interface.
 
 ## Install
 

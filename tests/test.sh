@@ -92,13 +92,15 @@ fi
 echo
 echo "  check_terminal_size"
 check_terminal_size 62 28
-assert_rc 0 $? 'accepts minimum terminal size'
+assert_rc 0 $? 'accepts the former full-size layout'
 check_terminal_size 80 40
 assert_rc 0 $? 'accepts a standard terminal size'
+check_terminal_size 40 20
+assert_rc 0 $? 'accepts the compact layout boundary'
 set +e
-check_terminal_size 61 28 2>/dev/null
+check_terminal_size 39 20 2>/dev/null
 assert_rc 1 $? 'rejects insufficient width'
-check_terminal_size 62 27 2>/dev/null
+check_terminal_size 40 19 2>/dev/null
 assert_rc 1 $? 'rejects insufficient height'
 check_terminal_size bad 40 2>/dev/null
 assert_rc 1 $? 'rejects invalid dimensions'
