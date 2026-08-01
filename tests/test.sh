@@ -18,8 +18,8 @@ TOGLIT="$HERE/../toglit"
 STUBDIR="$(mktemp -d)"
 trap 'rm -rf "$STUBDIR"' EXIT
 
-for c in whiptail kreadconfig6 kwriteconfig6 steamos-session-select \
-         dbus-send xrdb pkexec systemctl pgrep pkill passwd qdbus6 \
+for c in whiptail kreadconfig6 kwriteconfig6 \
+         dbus-send xrdb systemctl pgrep pkill qdbus6 \
          plasmashell tput dbus-update-activation-environment gio setsid; do
     printf '#!/bin/sh\nexit 0\n' > "$STUBDIR/$c"
     chmod +x "$STUBDIR/$c"
@@ -88,28 +88,6 @@ else
     fail=$((fail+1))
     printf '  [FAIL] current login rejected or malformed: %q\n' "$u"
 fi
-
-echo
-echo "  privileged autologin failure handling"
-autologin_tmp="$(mktemp -d)"
-trap 'rm -rf "$STUBDIR" "$autologin_tmp"' EXIT
-printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/one.conf"
-printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/two.conf"
-# shellcheck disable=SC2034 # consumed by the sourced autologin helpers
-SDDM_SYSTEM_CONFS=("$autologin_tmp/one.conf" "$autologin_tmp/two.conf")
-pkexec() {
-    if [[ "${1:-}" == "/usr/bin/sed" ]]; then
-        return 1
-    fi
-    return 0
-}
-set +e
-_autologin_comment_persistent deck
-assert_rc 1 $? 'reports failed privileged edit'
-_autologin_write_persistent deck
-assert_rc 1 $? 'reports failed privileged write'
-set -e
-unset -f pkexec
 
 echo
 echo "  check_terminal_size"

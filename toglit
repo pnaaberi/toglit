@@ -3,7 +3,7 @@
 # https://github.com/pnaaberi/toglit
 #
 # Toggles KDE Plasma between Touch Mode (finger-friendly) and Desktop Mode,
-# and controls which session SteamOS autologins into on boot.
+# and controls KDE Desktop/Touch presentation.
 
 set -euo pipefail
 
@@ -62,7 +62,7 @@ print_splash() {
     done
     printf '\n'
     _hold "$pause"
-    printf '     %sToggle it.%s  %sTouch · Desktop · Reboot.%s\n' \
+    printf '     %sToggle it.%s  %sTouch · Desktop.%s\n' \
         "$C_HOOK" "$C_RST" "$C_TAG" "$C_RST"
     printf '         %sfor Steam Deck · SteamOS Desktop Mode%s\n' \
         "$C_TAG" "$C_RST"
@@ -114,10 +114,10 @@ install_shortcut() {
     tmpl="[Desktop Entry]
 Type=Application
 Categories=Utility;System;
-Comment=Mode + boot switcher designed for Steam Deck's SteamOS Desktop Mode
+Comment=Touch and Desktop mode switcher designed for Steam Deck's SteamOS Desktop Mode
 Exec=$script_path
 Icon=$icon_path
-Keywords=touch;toggle;mode;reboot;desktop;steamdeck;steamos;toglit;
+Keywords=touch;toggle;mode;desktop;steamdeck;steamos;toglit;
 Name=TOGLIT
 Terminal=true
 "
@@ -254,7 +254,7 @@ check_deps() {
     local missing=()
     local c
     for c in whiptail kreadconfig6 kwriteconfig6 \
-             steamos-session-select dbus-send xrdb pkexec systemctl \
+             dbus-send xrdb systemctl \
              sed awk find grep cut dirname pgrep pkill passwd id; do
         command -v "$c" >/dev/null 2>&1 || missing+=("$c")
     done
@@ -1129,16 +1129,14 @@ boot_menu() {
 # =============================================================================
 
 show_settings() {
-    local mode boot_target autologin backup_status
+    local mode backup_status
     mode="$(detect_mode)"
-    boot_target="$(get_boot_target)"
-    autologin="$(get_autologin_state)"
     backup_status="none"
     [[ -d "$BACKUP_DIR" ]] && backup_status="exists"
 
     whiptail --title " TOGLIT Status " --msgbox \
-        "\n  Session mode ....... $mode\n  Boot target ........ $boot_target\n  Autologin .......... $autologin\n  Backup ............. $backup_status" \
-        11 50
+        "\n  Session mode ....... $mode\n  Backup ............. $backup_status" \
+        8 50
 }
 
 # =============================================================================
@@ -1628,31 +1626,27 @@ run_onboarding() {
 
 main_menu() {
     while true; do
-        local current_mode boot_target mode_chip
+        local current_mode mode_chip
         current_mode="$(detect_mode)"
-        boot_target="$(get_boot_target)"
         if [[ "$current_mode" == "touch" ]]; then mode_chip="Touch"; else mode_chip="Desktop"; fi
 
         tui_menu \
             " TOGLIT  ·  v$VERSION " \
-            " session: $mode_chip   ·   boot: $boot_target " \
+            " session: $mode_chip " \
             "@header:session" "" \
             "1  Touch Mode" \
             "Makes everything finger-sized: bigger fonts, larger icons, wider scrollbars, and chunky window buttons. Good for handheld or tablet use. Use Steam's on-screen keyboard (Steam+X) when you need to type." \
             "2  Desktop Mode" \
             "Rolls back to your original KDE settings. The snapshot was taken the first time you launched TOGLIT — no opinions imposed, just your setup." \
-            "@header:boot" "" \
-            "3  Boot Settings" \
-            "Pick which mode the Deck always opens on power-on — Desktop or Gaming — with or without rebooting right now. The choice sticks until you change it here again." \
             "@header:system" "" \
-            "4  Current Status" \
-            "Quick read-only view of what TOGLIT owns: session mode, boot target, and whether a backup exists." \
-            "5  Restore Backup" \
+            "3  Current Status" \
+            "Quick read-only view of what TOGLIT owns: session mode and whether a backup exists." \
+            "4  Restore Backup" \
             "Same effect as Desktop Mode: rolls back to the first-launch snapshot. Kept as a separate entry in case Desktop Mode ever feels broken." \
-            "6  Create Desktop Shortcut" \
+            "5  Create Desktop Shortcut" \
             "Places (or re-places) the TOGLIT icon on your Desktop and in the application menu. Run it the first time to get the icon, or any time later if you accidentally delete it." \
             "@header:app" "" \
-            "7  Exit" \
+            "6  Exit" \
             "Close TOGLIT. Nothing changes on exit. Relaunch from the Desktop icon or by typing 'toglit' in a terminal." \
             || return 0
 
@@ -1677,11 +1671,10 @@ main_menu() {
                     toggle_desktop
                 fi
                 ;;
-            3) boot_menu ;;
-            4) show_settings ;;
-            5) restore_backup ;;
-            6) repair_shortcut ;;
-            7) return 0 ;;
+            3) show_settings ;;
+            4) restore_backup ;;
+            5) repair_shortcut ;;
+            6) return 0 ;;
         esac
     done
 }
@@ -1745,8 +1738,7 @@ force_disable_vkbd
 # First-launch onboarding: walks through autologin repair, boot target,
 # password check, and desktop shortcut. Runs once, skipped on return visits.
 if _onboarding_needed; then
-    run_onboarding
-    clear
+    _onboarding_mark_done
 fi
 
 main_menu
