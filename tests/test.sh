@@ -95,6 +95,7 @@ autologin_tmp="$(mktemp -d)"
 trap 'rm -rf "$STUBDIR" "$autologin_tmp"' EXIT
 printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/one.conf"
 printf '[Autologin]\n#User=deck\n' > "$autologin_tmp/two.conf"
+# shellcheck disable=SC2034 # consumed by the sourced autologin helpers
 SDDM_SYSTEM_CONFS=("$autologin_tmp/one.conf" "$autologin_tmp/two.conf")
 pkexec() {
     if [[ "${1:-}" == "/usr/bin/sed" ]]; then
