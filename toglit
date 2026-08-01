@@ -1219,7 +1219,7 @@ tui_menu() {
     local cols lines
     cols="$(tput cols 2>/dev/null || echo 62)"
     lines="$(tput lines 2>/dev/null || echo 28)"
-    local width=$((cols - 2))
+    local width=$cols
     (( width > 62 )) && width=62
     (( width < 40 )) && width=40
     local inner=$((width - 4))     # text cell inside "│  ...  │"
@@ -1626,23 +1626,8 @@ _ob_summary() {
 # ── Main wizard ───────────────────────────────────────────────────────────────
 
 run_onboarding() {
-    whiptail --title " Welcome to TOGLIT  v$VERSION " --yesno \
-        "\n  TOGLIT is your Steam Deck's mode switcher:\n\n  · Flip between finger-friendly Touch Mode\n    and standard KDE Desktop Mode.\n  · Set which session (Gaming or Desktop)\n    the Deck boots into by default.\n  · Fix the SteamOS autologin quirks that\n    prevent Gaming Mode from launching.\n\n  This one-time setup takes about 1 minute\n  and makes sure everything works correctly.\n\n  Run setup now?" \
-        20 60 --yes-button "Let's go" --no-button "Skip" || {
-        _onboarding_mark_done
-        return 0
-    }
-
-    clear
-    _ob_autologin
-    clear
-    _ob_boot_target
-    clear
-    _ob_shortcut
-    clear
-    _ob_summary
-
     _onboarding_mark_done
+    return 0
 }
 
 main_menu() {
