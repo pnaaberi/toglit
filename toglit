@@ -1216,8 +1216,9 @@ tui_menu() {
     done
 
     local n=${#labels[@]}
-    local cols="$(tput cols 2>/dev/null || echo 62)"
-    local lines="$(tput lines 2>/dev/null || echo 28)"
+    local cols lines
+    cols="$(tput cols 2>/dev/null || echo 62)"
+    lines="$(tput lines 2>/dev/null || echo 28)"
     local width=$((cols - 2))
     (( width > 62 )) && width=62
     (( width < 40 )) && width=40
