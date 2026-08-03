@@ -30,6 +30,8 @@ export PATH="$STUBDIR:$PATH"
 export TOGLIT_SOURCE_ONLY=1
 # shellcheck disable=SC1090
 source "$TOGLIT"
+# shellcheck source=../docs/examples/tui-primitives.sh
+source "$HERE/../docs/examples/tui-primitives.sh"
 
 fail=0
 pass=0
@@ -222,6 +224,33 @@ _test_tui_input 'k wraps from item 1 to item 5' 'k\r' '0:5' 'Exit help'
 _test_tui_input 'number 4 selects item 4 directly' '4' '0:4'
 _test_tui_input 'Space selects the highlighted item' ' ' '0:1'
 _test_tui_input 'Backspace cancels like Deck B' '\177' '1:none'
+
+echo
+echo "  documented TUI primitives"
+assert_eq "$(tui_fit_cell 'abcdef' 4)" 'abc…' 'table cells truncate with an ellipsis'
+assert_eq "$(tui_fit_cell 'ab' 4)" 'ab  ' 'table cells pad to their declared width'
+assert_eq "$(tui_table_row 4 Name 5 Value)" '│ Name │ Value │' 'table row keeps stable column widths'
+set +e
+tui_table_row bad Name >/dev/null 2>&1
+assert_rc 2 $? 'table row rejects invalid widths'
+assert_eq "$(tui_mouse_enable | od -An -tx1 | tr -d ' \n')" '1b5b3f31303030681b5b3f3130303668' 'mouse enable sequence uses modes 1000 and 1006'
+assert_eq "$(tui_mouse_disable | od -An -tx1 | tr -d ' \n')" '1b5b3f313030366c1b5b3f313030306c' 'mouse modes disable in reverse order'
+tui_parse_sgr_mouse $'\e[<0;12;7M'
+assert_eq "$MOUSE_ACTION:$MOUSE_BUTTON:$MOUSE_X:$MOUSE_Y" 'press:1:11:6' 'parses SGR left-click coordinates'
+tui_parse_sgr_mouse $'\e[<0;12;7m'
+assert_eq "$MOUSE_ACTION:$MOUSE_BUTTON" 'release:0' 'parses SGR button release'
+tui_parse_sgr_mouse $'\e[<64;3;4M'
+assert_eq "$MOUSE_ACTION:$MOUSE_BUTTON:$MOUSE_X:$MOUSE_Y" 'wheel:4:2:3' 'parses SGR wheel-up events'
+tui_parse_sgr_mouse $'\e[<52;9;10M'
+assert_eq "$MOUSE_ACTION:$MOUSE_CTRL:$MOUSE_SHIFT:$MOUSE_X:$MOUSE_Y" 'drag:1:1:8:9' 'parses drag and modifier bits'
+tui_parse_sgr_mouse $'\e[<000;008;009M'
+assert_eq "$MOUSE_ACTION:$MOUSE_X:$MOUSE_Y" 'press:7:8' 'parses leading-zero fields as decimal'
+set +e
+tui_parse_sgr_mouse $'\e[Mbad'
+assert_rc 1 $? 'rejects malformed mouse reports'
+tui_parse_sgr_mouse $'\e[<0;99999999999999999999;1M'
+assert_rc 1 $? 'rejects oversized mouse coordinates before arithmetic'
+set -e
 
 echo
 if (( fail == 0 )); then
