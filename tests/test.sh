@@ -10,6 +10,7 @@ set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TOGLIT="$HERE/../toglit"
+ORIGINAL_PATH="$PATH"
 
 # PATH shim: empty stubs for every binary the dep check requires. The
 # dep check isn't invoked in source-only mode, but sourcing may still
@@ -128,6 +129,99 @@ _plasma_set_desktop_icon_size 7  2>/dev/null; assert_rc 1 $? 'rejects 7 (out of 
 _plasma_set_desktop_icon_size -1 2>/dev/null; assert_rc 1 $? 'rejects negative'
 _plasma_set_desktop_icon_size x  2>/dev/null; assert_rc 1 $? 'rejects non-numeric'
 set -e
+
+echo
+echo "  tui_menu live resize"
+resize_capture="$STUBDIR/resize.typescript"
+set +e
+(
+    sleep 1.5
+    printf '\033'
+) | TOGLIT_TEST_TARGET="$TOGLIT" PATH="$ORIGINAL_PATH" TERM=xterm \
+    script -qfec 'bash -lc '\''
+        tty_path=$(tty)
+        stty cols 32 rows 28
+        export TOGLIT_SOURCE_ONLY=1
+        source "$TOGLIT_TEST_TARGET"
+        (
+            sleep 0.4
+            stty -F "$tty_path" cols 40 rows 20
+            sleep 0.4
+            stty -F "$tty_path" cols 62 rows 24
+            sleep 0.4
+            stty -F "$tty_path" cols 80 rows 28
+        ) &
+        tui_menu Test Sub \
+            "@header:session" "" \
+            "1  Touch Mode" "Touch help" \
+            "2  Restore Desktop Settings" "Restore help" \
+            "@header:system" "" \
+            "3  Current Status" "Status help" \
+            "4  Repair Desktop Shortcut" "Shortcut help" \
+            "@header:app" "" \
+            "5  Exit" "Exit help"
+    '\''' "$resize_capture" >/dev/null 2>&1
+resize_rc=$?
+set -e
+assert_rc 1 "$resize_rc" 'Esc cancels after a live resize'
+compact_border="┌$(printf '─%.0s' $(seq 1 36))┐"
+if grep -aqF 'TOGLIT paused' "$resize_capture" &&
+   grep -aqF 'Window: 32x28' "$resize_capture" &&
+   grep -aqF 'Resize to continue' "$resize_capture" &&
+   grep -aqF "$compact_border" "$resize_capture" &&
+   grep -aqF 'A/Enter' "$resize_capture" &&
+   grep -aqF 'B/Esc back' "$resize_capture" &&
+   grep -aqF 'Deck: D-pad' "$resize_capture" &&
+   grep -aqF 'Repair Desktop Shortcut' "$resize_capture"; then
+    pass=$((pass+1))
+    printf '  [ok]   keeps controls visible at 32x28, 40x20, 62x24, and 80x28\n'
+else
+    fail=$((fail+1))
+    printf '  [FAIL] resize capture did not contain compact guidance and full layout\n'
+fi
+
+_test_tui_input() {
+    local name="$1" input="$2" expected="$3" expected_help="${4:-}"
+    local capture="$STUBDIR/input-${name}.typescript"
+    (
+        sleep 0.3
+        printf '%b' "$input"
+    ) | TOGLIT_TEST_TARGET="$TOGLIT" PATH="$ORIGINAL_PATH" TERM=xterm \
+        script -qfec 'bash -lc '\''
+            stty cols 80 rows 28
+            export TOGLIT_SOURCE_ONLY=1
+            source "$TOGLIT_TEST_TARGET"
+            set +e
+            tui_menu Test Sub \
+                "@header:session" "" \
+                "1  Touch Mode" "Touch help" \
+                "2  Restore Desktop Settings" "Restore help" \
+                "@header:system" "" \
+                "3  Current Status" "Status help" \
+                "4  Repair Desktop Shortcut" "Shortcut help" \
+                "@header:app" "" \
+                "5  Exit" "Exit help"
+            rc=$?
+            printf "RESULT=%s:%s\n" "$rc" "${REPLY:-none}"
+        '\''' "$capture" >/dev/null 2>&1
+
+    if grep -aqF "RESULT=$expected" "$capture" &&
+       { [[ -z "$expected_help" ]] || grep -aqF "$expected_help" "$capture"; }; then
+        pass=$((pass+1))
+        printf '  [ok]   %s\n' "$name"
+    else
+        fail=$((fail+1))
+        printf '  [FAIL] %s\n' "$name"
+    fi
+}
+
+echo
+echo "  tui_menu controls"
+_test_tui_input 'down arrow + Enter selects item 2' '\e[B\r' '0:2' 'Restore help'
+_test_tui_input 'k wraps from item 1 to item 5' 'k\r' '0:5' 'Exit help'
+_test_tui_input 'number 4 selects item 4 directly' '4' '0:4'
+_test_tui_input 'Space selects the highlighted item' ' ' '0:1'
+_test_tui_input 'Backspace cancels like Deck B' '\177' '1:none'
 
 echo
 if (( fail == 0 )); then
