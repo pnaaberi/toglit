@@ -77,7 +77,9 @@ git diff --check
 ```
 
 The tests cover hostile input escaping, safe numeric bounds, privileged boot
-editing removal, and terminal-size boundaries.
+editing removal, terminal-size boundaries, live PTY resize behavior, and TUI
+controls. See [docs/TUI.md](docs/TUI.md) for the renderer design, terminal
+constraints, resize lessons, and UX test checklist.
 
 ## License
 

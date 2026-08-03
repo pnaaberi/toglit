@@ -1222,16 +1222,28 @@ tui_menu() {
     done
 
     local n=${#labels[@]}
-    local cols lines
-    cols="$(tput cols 2>/dev/null || echo 62)"
-    lines="$(tput lines 2>/dev/null || echo 28)"
-    local width=$cols
-    (( width > 62 )) && width=62
-    (( width < 40 )) && width=40
-    local inner=$((width - 4))     # text cell inside "│  ...  │"
-    local help_h=3                 # reserved help lines — fixed, no layout shift
-    (( lines < 24 )) && help_h=2
-    (( lines < 22 )) && help_h=1
+    local cols lines width inner help_h bar
+    _tui_update_layout() {
+        local detected_cols detected_lines
+        detected_cols="$(tput cols 2>/dev/null || true)"
+        detected_lines="$(tput lines 2>/dev/null || true)"
+        # During a live resize some terminals briefly return an empty or
+        # non-numeric size. Never feed that value into Bash arithmetic.
+        [[ "$detected_cols" =~ ^[0-9]+$ ]] && cols="$detected_cols" || cols=0
+        [[ "$detected_lines" =~ ^[0-9]+$ ]] && lines="$detected_lines" || lines=0
+        # Leave one column of breathing room on each side. Drawing through the
+        # terminal's final column triggers auto-wrap in several emulators and
+        # can push the control legend below the viewport.
+        width=$((cols - 2))
+        (( width > 62 )) && width=62
+        (( width < 38 )) && width=38
+        inner=$((width - 4))
+        help_h=3
+        (( lines < 24 )) && help_h=2
+        (( lines < 22 )) && help_h=1
+        bar="$(printf '─%.0s' $(seq 1 $((width - 2))))"
+    }
+    _tui_update_layout
 
     # Build a map of selectable indices (skips @header: rows).
     local items=()
@@ -1254,8 +1266,6 @@ tui_menu() {
     local C_ITEM=$'\e[97m'           # bright white
     local C_HELP=$'\e[36m'           # cyan help text
     local C_HINT=$'\e[2;37m'         # dim hint
-
-    local bar; bar="$(printf '─%.0s' $(seq 1 $((width - 2))))"
 
     # Pad $1 with spaces on the right to CHARACTER width $2. Bash's ${#s}
     # counts characters when LC_ALL is UTF-8, so em-dashes/middle-dots/box
@@ -1283,6 +1293,23 @@ tui_menu() {
     }
 
     _tui_draw() {
+        if (( cols < 40 || lines < 20 )); then
+            tput cup 0 0
+            if (( cols >= 24 && lines >= 5 )); then
+                printf '%sTOGLIT paused%s\n\n' "$C_TITLE" "$C_RST"
+                printf '%s\n' "$(_fit "Window: ${cols}x${lines}" "$cols")"
+                printf '%s\n' "$(_fit 'Minimum: 40x20' "$cols")"
+                printf '%s' "$(_fit 'Resize to continue' "$cols")"
+            elif (( lines >= 3 )); then
+                printf '%s\n' "$(_fit 'TOGLIT paused' "$cols")"
+                printf '%s\n' "$(_fit 'Need 40x20' "$cols")"
+                printf '%s' "$(_fit 'Resize window' "$cols")"
+            else
+                printf '%s' "$(_fit 'Need 40x20' "$cols")"
+            fi
+            tput ed
+            return
+        fi
         tput cup 0 0
         printf '%s┌%s┐%s\n' "$C_BOX" "$bar" "$C_RST"
         printf '%s│%s %s %s│%s\n' \
@@ -1356,7 +1383,10 @@ tui_menu() {
         done
 
         printf '%s└%s┘%s\n' "$C_BOX" "$bar" "$C_RST"
-        if (( lines >= 24 )); then
+        # The full control legend consumes five rows after the menu. It needs
+        # at least 25 terminal rows for this menu; at 24 rows use the compact
+        # two-line legend so controls remain visible on initial draw too.
+        if (( width >= 62 && lines >= 25 )); then
             printf '\n'
             printf '  %sSteam Deck:  D-pad ↑↓ (move)  ·  A (select)  ·  B (back)%s\n' \
                 "$C_HINT" "$C_RST"
@@ -1365,8 +1395,12 @@ tui_menu() {
                 "$C_HINT" "$C_RST"
             printf '               %sEsc / Backspace (back)%s' \
                 "$C_HINT" "$C_RST"
+        elif (( width >= 50 && lines >= 22 )); then
+            printf '\n'
+            printf '  %sDeck: D-pad ↑↓ · A select · B back%s\n' "$C_HINT" "$C_RST"
+            printf '  %sKeys: ↑↓ · Enter select · Esc back%s' "$C_HINT" "$C_RST"
         else
-            printf '\n  %s↑↓ move · Enter select · Esc back%s' "$C_HINT" "$C_RST"
+            printf '\n  %s↑↓ move · A/Enter · B/Esc back%s' "$C_HINT" "$C_RST"
         fi
         tput ed  # erase to end of screen — wipes leftovers from larger prior menus
     }
@@ -1386,9 +1420,38 @@ tui_menu() {
     }
 
     local k k2
+    local last_cols=-1 last_lines=-1 needs_redraw=1
     while true; do
-        _tui_draw
-        if ! IFS= read -rsn1 k; then
+        _tui_update_layout
+        if (( cols != last_cols || lines != last_lines )); then
+            # A resize is a full TUI reload. Clearing first avoids wrapped
+            # remnants from the previous geometry.
+            clear
+            last_cols=$cols
+            last_lines=$lines
+            needs_redraw=1
+        fi
+        if (( needs_redraw )); then
+            _tui_draw
+            needs_redraw=0
+        fi
+        if (( cols < 40 || lines < 20 )); then
+            if ! IFS= read -rsn1 -t 0.2 k; then
+                # A timed read lets us notice a terminal resize even when the
+                # terminal does not deliver SIGWINCH to the shell.
+                if [[ -t 0 ]]; then
+                    continue
+                fi
+                tput cnorm 2>/dev/null || true
+                clear
+                return 1
+            fi
+            continue
+        fi
+        if ! IFS= read -rsn1 -t 0.2 k; then
+            if [[ -t 0 ]]; then
+                continue
+            fi
             # EOF on stdin (e.g., script piped input). Treat as cancel.
             tput cnorm 2>/dev/null || true
             clear
@@ -1401,10 +1464,12 @@ tui_menu() {
                     '[A')   # up arrow — previous selectable item, wrapping
                         sel_pos=$(( (sel_pos - 1 + item_count) % item_count ))
                         sel=${items[sel_pos]}
+                        needs_redraw=1
                         ;;
                     '[B')   # down arrow — next selectable item, wrapping
                         sel_pos=$(( (sel_pos + 1) % item_count ))
                         sel=${items[sel_pos]}
+                        needs_redraw=1
                         ;;
                     '')     # bare Esc — only this exits
                         tput cnorm 2>/dev/null || true
@@ -1443,10 +1508,12 @@ tui_menu() {
             j)
                 sel_pos=$(( (sel_pos + 1) % item_count ))
                 sel=${items[sel_pos]}
+                needs_redraw=1
                 ;;
             k)
                 sel_pos=$(( (sel_pos - 1 + item_count) % item_count ))
                 sel=${items[sel_pos]}
+                needs_redraw=1
                 ;;
             # Anything else (letters, punctuation, stray keystrokes) — ignore.
             # Only Esc / Backspace / menu-Exit close the app.
@@ -1713,7 +1780,9 @@ fi
 trap cleanup EXIT
 
 check_deps
-check_terminal_size
+# A small terminal is handled by tui_menu's resize screen. Keep the startup
+# check quiet so its diagnostic cannot be mistaken for the live TUI screen.
+check_terminal_size >/dev/null 2>&1 || true
 migrate_state
 
 print_splash animate
