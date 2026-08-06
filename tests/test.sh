@@ -135,11 +135,19 @@ set -e
 echo
 echo "  tui_menu live resize"
 resize_capture="$STUBDIR/resize.typescript"
+resize_ready="$STUBDIR/resize.ready"
 set +e
 (
-    sleep 1.5
+    # Wait until the child has applied the final resize. This avoids racing
+    # process startup on slower CI runners while still bounding the test.
+    for ((attempt = 0; attempt < 200; attempt++)); do
+        [[ -f "$resize_ready" ]] && break
+        sleep 0.05
+    done
+    sleep 0.5
     printf '\033'
-) | TOGLIT_TEST_TARGET="$TOGLIT" PATH="$ORIGINAL_PATH" TERM=xterm \
+) | TOGLIT_TEST_TARGET="$TOGLIT" TOGLIT_RESIZE_READY="$resize_ready" \
+    PATH="$ORIGINAL_PATH" TERM=xterm \
     script -qfec 'bash -lc '\''
         tty_path=$(tty)
         stty cols 32 rows 28
@@ -152,6 +160,7 @@ set +e
             stty -F "$tty_path" cols 62 rows 24
             sleep 0.4
             stty -F "$tty_path" cols 80 rows 28
+            : > "$TOGLIT_RESIZE_READY"
         ) &
         tui_menu Test Sub \
             "@header:session" "" \
