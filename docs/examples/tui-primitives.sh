@@ -36,6 +36,7 @@ tui_mouse_disable() { printf '\e[?1006l\e[?1000l'; }
 
 # Parse xterm SGR mouse input: ESC [ < Cb ; Cx ; Cy M/m
 # Results are returned in MOUSE_* globals. X and Y become zero-based.
+# shellcheck disable=SC2034 # MOUSE_* values are the function's sourceable outputs.
 tui_parse_sgr_mouse() {
     local sequence="$1" code_text x_text y_text code suffix raw_button
     [[ "$sequence" =~ ^$'\e'\[\<([0-9]{1,6})\;([0-9]{1,6})\;([0-9]{1,6})([Mm])$ ]] || return 1
