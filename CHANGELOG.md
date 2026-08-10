@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Improvements
+
+- Renamed the menu's restore action to **Desktop Mode** and moved current mode
+  and backup state into the always-visible menu status line.
+
+### TUI engineering
+
+- Added a comprehensive TUI building guide covering architecture, terminal
+  capabilities and lifecycle, input decoding, resizing, table layout, optional
+  SGR mouse support, Unicode display width, accessibility, scrolling,
+  performance, compatibility, security, and layered testing.
+- Added tested reference primitives for fixed-width table rows and bounded SGR
+  mouse parsing. Mouse support remains optional and is not enabled in TOGLIT's
+  product menu.
+- Expanded PTY regression coverage for live resize, real main-menu geometry,
+  keyboard and Steam Deck controls, final-column auto-wrap, and compact control
+  legends.
+
 ## v1.3.0 — onboarding wizard + persistent autologin fix
 
 ### Features
