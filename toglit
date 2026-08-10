@@ -1705,25 +1705,32 @@ run_onboarding() {
 
 main_menu() {
     while true; do
-        local current_mode mode_chip
+        local current_mode mode_chip backup_chip
         current_mode="$(detect_mode)"
-        if [[ "$current_mode" == "touch" ]]; then mode_chip="Touch"; else mode_chip="Desktop"; fi
+        case "$current_mode" in
+            touch) mode_chip="Touch Mode" ;;
+            desktop) mode_chip="Desktop Mode" ;;
+            *) mode_chip="$current_mode" ;;
+        esac
+        if [[ -d "$BACKUP_DIR" ]]; then
+            backup_chip="backup available"
+        else
+            backup_chip="no backup"
+        fi
 
         tui_menu \
             " TOGLIT  ·  v$VERSION " \
-            " session: $mode_chip " \
+            " Current status: $mode_chip · $backup_chip " \
             "@header:session" "" \
             "1  Touch Mode" \
             "Makes everything finger-sized: bigger fonts, larger icons, wider scrollbars, and chunky window buttons. Good for handheld or tablet use. Use Steam's on-screen keyboard (Steam+X) when you need to type." \
-            "2  Restore Desktop Settings" \
-            "Restores the KDE settings saved before your first Touch Mode change." \
+            "2  Desktop Mode" \
+            "Restores the original KDE desktop settings saved before your first Touch Mode change." \
             "@header:system" "" \
-            "3  Current Status" \
-            "Quick read-only view of what TOGLIT owns: session mode and whether a backup exists." \
-            "4  Repair Desktop Shortcut" \
+            "3  Repair Desktop Shortcut" \
             "Creates or replaces the TOGLIT shortcut on your Desktop and in the application menu." \
             "@header:app" "" \
-            "5  Exit" \
+            "4  Exit" \
             "Close TOGLIT. Nothing changes on exit. Relaunch from the Desktop icon or by typing 'toglit' in a terminal." \
             || return 0
 
@@ -1739,9 +1746,8 @@ main_menu() {
                 fi
                 ;;
             2) toggle_desktop ;;
-            3) show_settings ;;
-            4) repair_shortcut ;;
-            5) return 0 ;;
+            3) repair_shortcut ;;
+            4) return 0 ;;
         esac
     done
 }
