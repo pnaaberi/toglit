@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Improvements
+
+- Renamed the menu's restore action to **Desktop Mode** and moved current mode
+  and backup state into the always-visible menu status line.
+
 ### TUI engineering
 
 - Added a comprehensive TUI building guide covering architecture, terminal
