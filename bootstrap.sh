@@ -6,9 +6,7 @@
 #   # latest main (default)
 #   curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh | bash
 #
-#   # pin to a signed tag or commit SHA (reproducible install)
-#   curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh \
-#     | TOGLIT_REF=v1.2.0 bash
+# Set TOGLIT_REF to a verified existing tag or commit SHA for a pinned install.
 #
 # Clones the repo to ~/Projects/toglit (or updates it if already present),
 # checks out TOGLIT_REF (default: main), prints the resolved commit SHA so
