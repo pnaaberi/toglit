@@ -44,7 +44,7 @@ bootstrap helper can be downloaded and inspected before execution:
 curl -fsSL https://raw.githubusercontent.com/pnaaberi/toglit/main/bootstrap.sh \
   -o /tmp/toglit-bootstrap.sh
 less /tmp/toglit-bootstrap.sh
-TOGLIT_REF=v1.2.0 bash /tmp/toglit-bootstrap.sh
+bash /tmp/toglit-bootstrap.sh
 ```
 
 ## Use
