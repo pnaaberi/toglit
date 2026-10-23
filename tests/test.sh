@@ -261,6 +261,8 @@ tui_parse_sgr_mouse $'\e[<0;99999999999999999999;1M'
 assert_rc 1 $? 'rejects oversized mouse coordinates before arithmetic'
 set -e
 
+# Disposable launcher fixtures; no live KDE settings or desktop writes.
+bash "$HERE/test-launcher.sh"
 echo
 if (( fail == 0 )); then
     printf '  %d passed, 0 failed\n' "$pass"

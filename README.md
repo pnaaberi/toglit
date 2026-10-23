@@ -57,6 +57,13 @@ The main menu provides Touch Mode, Desktop Mode, Repair Desktop Shortcut, and
 Exit. The current mode and backup state stay visible above the menu at all
 times.
 
+Installer and shortcut repair share `desktop-entry.sh` and `toglit.desktop`;
+keep these files beside the `toglit` script. Launcher paths are literal, including
+spaces, ampersands, quotes, backslashes, dollar signs and percent signs. Exec
+uses `/usr/bin/env` with one quoted path argument (no shell); this also avoids
+parsers checking a percent-escaped executable before expanding `%%`. Control
+characters and `=` in executable paths are refused rather than misencoded.
+
 The backup is created before TOGLIT changes KDE settings. Desktop Mode restores
 those saved settings and removes TOGLIT's virtual-keyboard environment drop-in.
 
@@ -72,14 +79,19 @@ those saved settings and removes TOGLIT's virtual-keyboard environment drop-in.
 
 ```sh
 bash tests/test.sh
-for f in bootstrap.sh install.sh uninstall.sh toglit tests/*.sh; do bash -n "$f"; done
+for f in *.sh toglit tests/*.sh; do bash -n "$f"; done
 git diff --check
 ```
 
 The tests cover hostile input escaping, safe numeric bounds, privileged boot
 editing removal, terminal-size boundaries, live PTY resize behavior, and TUI
-controls. See [docs/TUI.md](docs/TUI.md) for the renderer design, terminal
-constraints, resize lessons, and UX test checklist.
+controls. Launcher fixtures run the repair CLI and shared installer renderer
+against literal paths. When installed, `desktop-file-validate` validates the
+entries, and `/usr/bin/python3` with `python3-gi` parses them via Gio and launches
+only a harmless fixture executable. This smoke disables Terminal only in the
+fixture; Steam Deck terminal/KDE integration remains a device acceptance check.
+See [docs/TUI.md](docs/TUI.md) for the renderer design, terminal constraints,
+resize lessons, and UX test checklist.
 
 ## License
 

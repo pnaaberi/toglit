@@ -7,6 +7,18 @@
 - Renamed the menu's restore action to **Desktop Mode** and moved current mode
   and backup state into the always-visible menu status line.
 
+### Security — 23 October 2026
+
+- Installer and shortcut repair share a literal Desktop Entry renderer, including
+  string/Exec escaping and percent expansion through a shell-free `/usr/bin/env`
+  launcher. Validate hostile paths with a real Gio parser and harmless launch;
+  reject control characters and malformed templates. Keep the shared helper and
+  template beside the main script.
+- Pin CI checkout to its reviewed immutable v4 commit and avoid persisting
+  repository credentials in source checkouts.
+- This source-only change preserves existing backup/bootstrap/TUI behavior; it
+  does not adopt unrelated unpublished local changes or establish device acceptance.
+
 ### TUI engineering
 
 - Added a comprehensive TUI building guide covering architecture, terminal
