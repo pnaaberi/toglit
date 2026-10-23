@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TOGLIT_BIN="$SCRIPT_DIR/toglit"
 DESKTOP_TEMPLATE="$SCRIPT_DIR/toglit.desktop"
 ICON_SRC="$SCRIPT_DIR/icons/toglit.svg"
+# shellcheck source=desktop-entry.sh
+source "$SCRIPT_DIR/desktop-entry.sh"
 
 LOCAL_BIN="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
@@ -51,13 +53,9 @@ ok "installed $ICON_DEST"
 # ---- Render .desktop files (substitute absolute Exec + Icon paths) ----
 mkdir -p "$APPS_DIR" "$DESKTOP_DIR"
 render_desktop() {
-    # awk with `-v` passes replacements as literal strings, so paths
-    # containing `|`, `&`, `\` (which would break a sed replacement) are
-    # substituted verbatim.
-    local dest="$1"
-    awk -v bin="$TOGLIT_BIN" -v icon="$ICON_DEST" '
-        { gsub(/__TOGLIT_EXEC__/, bin); gsub(/__TOGLIT_ICON__/, icon); print }
-    ' "$DESKTOP_TEMPLATE" > "$dest"
+    local dest="$1" content
+    content="$(render_desktop_entry "$DESKTOP_TEMPLATE" "$TOGLIT_BIN" "$ICON_DEST")" || return 1
+    printf '%s\n' "$content" > "$dest" || return 1
     chmod +x "$dest"
 }
 render_desktop "$APPS_DIR/toglit.desktop"

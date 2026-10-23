@@ -80,7 +80,7 @@ print_splash() {
 # =============================================================================
 
 install_shortcut() {
-    local script_path apps_dir desktop_dir tmpl icon_path
+    local script_path script_dir apps_dir desktop_dir tmpl icon_path
     # Resolve to an absolute path that survives PATH lookup + symlinks.
     # Cover three launch modes: `toglit` (via ~/.local/bin symlink),
     # `./toglit` (relative), `/abs/path/toglit` (absolute).
@@ -91,6 +91,9 @@ install_shortcut() {
         found="$(command -v "$0" 2>/dev/null)"
         script_path="$(readlink -f "$found" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
     fi
+    script_dir="$(dirname -- "$script_path")"
+    # shellcheck source=desktop-entry.sh
+    source "$script_dir/desktop-entry.sh" || return 1
     apps_dir="$HOME/.local/share/applications"
     desktop_dir="$HOME/Desktop"
     mkdir -p "$apps_dir" "$desktop_dir" 2>/dev/null || return 1
@@ -111,18 +114,9 @@ install_shortcut() {
         fi
     done
 
-    tmpl="[Desktop Entry]
-Type=Application
-Categories=Utility;System;
-Comment=Touch and Desktop mode switcher designed for Steam Deck's SteamOS Desktop Mode
-Exec=$script_path
-Icon=$icon_path
-Keywords=touch;toggle;mode;desktop;steamdeck;steamos;toglit;
-Name=TOGLIT
-Terminal=true
-"
-    printf '%s' "$tmpl" > "$apps_dir/toglit.desktop" || return 1
-    printf '%s' "$tmpl" > "$desktop_dir/toglit.desktop" || return 1
+    tmpl="$(render_desktop_entry "$script_dir/toglit.desktop" "$script_path" "$icon_path")" || return 1
+    printf '%s\n' "$tmpl" > "$apps_dir/toglit.desktop" || return 1
+    printf '%s\n' "$tmpl" > "$desktop_dir/toglit.desktop" || return 1
     chmod +x "$apps_dir/toglit.desktop" "$desktop_dir/toglit.desktop" 2>/dev/null || true
     gio set -t string "$desktop_dir/toglit.desktop" metadata::trusted true 2>/dev/null || true
     return 0
